@@ -15,10 +15,10 @@ local DEFAULT_CONFIG = {
 	Corner = true,
 	Thickness = 2,
 	Transparency = 0,
-	UpdateInterval = 0.033,
 	MaxDistance = 5000,
 	TeamCheck = false,
 	CornerLengthFraction = 0.2,
+	MeasureInterval = 1,
 }
 
 local Target = {}
@@ -33,16 +33,22 @@ function Target.new(manager, key, isPlayer)
 	self.RootPart = nil
 	self.CachedCFrame = nil
 	self.Size = nil
-	self.MeasureAt = 0
+	self.SizeVersion = 0
+	self.MeasuredAt = 0
 	self.Visible = false
+	self.LastCamera = nil
+	self.LastCenter = nil
+	self.LastRot = nil
+	self.LastSizeVersion = 0
 	self.Lines = {}
 	self.Connections = {}
 	if Drawing then
+		local config = manager.Config
 		for i = 1, 8 do
 			local line = Drawing.new("Line")
-			line.Color = manager.Config.Color
-			line.Thickness = manager.Config.Thickness
-			line.Transparency = manager.Config.Transparency
+			line.Color = config.Color
+			line.Thickness = config.Thickness
+			line.Transparency = 1 - config.Transparency
 			line.Visible = false
 			self.Lines[i] = line
 		end
@@ -67,8 +73,10 @@ end
 function Target:BindCharacter(character)
 	self.Model = character
 	local rootPart = character:WaitForChild("HumanoidRootPart", 15)
-	if rootPart and character == self.Model then
+	character:WaitForChild("Humanoid", 15)
+	if character == self.Model then
 		self.RootPart = rootPart
+		task.wait()
 		self:_measure()
 	end
 end
@@ -93,12 +101,54 @@ function Target:_measure()
 	if not model then
 		return
 	end
-	local cf, size = model:GetBoundingBox()
-	if size and size.Magnitude > 0 then
-		self.Size = size
-		if not self.RootPart then
+	local refCF
+	if self.RootPart then
+		refCF = self.RootPart.CFrame
+	else
+		local ok, cf = pcall(model.GetBoundingBox, model)
+		if ok and cf then
+			refCF = cf
 			self.CachedCFrame = cf
 		end
+	end
+	if not refCF then
+		return
+	end
+	local inv = refCF:Inverse()
+	local minX, minY, minZ = math.huge, math.huge, math.huge
+	local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+	local found = false
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			local sx, sy, sz = part.Size.X * 0.5, part.Size.Y * 0.5, part.Size.Z * 0.5
+			local pcf = part.CFrame
+			for dx = -1, 1, 2 do
+				for dy = -1, 1, 2 do
+					for dz = -1, 1, 2 do
+						local corner = inv * (pcf * Vector3.new(sx * dx, sy * dy, sz * dz))
+						local x, y, z = corner.X, corner.Y, corner.Z
+						if x < minX then minX = x end
+						if x > maxX then maxX = x end
+						if y < minY then minY = y end
+						if y > maxY then maxY = y end
+						if z < minZ then minZ = z end
+						if z > maxZ then maxZ = z end
+					end
+				end
+			end
+			found = true
+		end
+	end
+	if not found then
+		return
+	end
+	local size = Vector3.new(maxX - minX, maxY - minY, maxZ - minZ)
+	if size.Magnitude <= 0.01 then
+		return
+	end
+	if not self.Size or (size - self.Size).Magnitude > 0.1 then
+		self.Size = size
+		self.SizeVersion = self.SizeVersion + 1
 	end
 end
 
@@ -110,15 +160,17 @@ function Target:Update(camera)
 		return
 	end
 	if model.Parent == nil then
-		self.Manager:_removeTarget(self)
+		if self.Player then
+			self:Unbind()
+		else
+			self.Manager:_removeTarget(self)
+		end
 		return
 	end
-	if not self.Player then
-		local now = os.clock()
-		if now >= self.MeasureAt then
-			self:_measure()
-			self.MeasureAt = now + self.Manager.MeasureInterval
-		end
+	local now = os.clock()
+	if now >= self.MeasuredAt then
+		self.MeasuredAt = now + config.MeasureInterval
+		self:_measure()
 	end
 	local cf = self.RootPart and self.RootPart.CFrame or self.CachedCFrame
 	if not cf or not self.Size then
@@ -142,6 +194,26 @@ function Target:Update(camera)
 		return
 	end
 
+	local camCF = camera.CFrame
+	local rot = cf.Rotation
+	local cameraMoved = self.LastCamera ~= camCF
+	local rotated = self.LastRot ~= rot
+	local centerMoved = true
+	if self.LastCenter then
+		local dx = center.X - self.LastCenter.X
+		local dy = center.Y - self.LastCenter.Y
+		centerMoved = dx * dx + dy * dy >= 0.25
+	end
+	if not cameraMoved and not rotated and not centerMoved
+		and self.LastSizeVersion == self.SizeVersion and self.Visible then
+		return
+	end
+	self.LastCamera = camCF
+	self.LastRot = rot
+	self.LastCenter = center
+	self.LastSizeVersion = self.SizeVersion
+
+	local viewport = camera.ViewportSize
 	local half = self.Size * 0.5
 	local right = cf.RightVector * half.X
 	local up = cf.UpVector * half.Y
@@ -149,31 +221,38 @@ function Target:Update(camera)
 
 	local minX, minY = math.huge, math.huge
 	local maxX, maxY = -math.huge, -math.huge
-	local anyFront = false
+	local behind = false
 
 	for i = 1, 8 do
 		local o = CORNER_OFFSETS[i]
-		local point = camera:WorldToViewportPoint(Vector3.new(
+		local point = camera:WorldToViewportPoint(
 			origin.X + right.X * o[1] + up.X * o[2] + look.X * o[3],
 			origin.Y + right.Y * o[1] + up.Y * o[2] + look.Y * o[3],
 			origin.Z + right.Z * o[1] + up.Z * o[2] + look.Z * o[3]
-		))
-		if point.Z > 0 then
-			anyFront = true
-			local px, py = point.X, point.Y
-			if px < minX then minX = px end
-			if px > maxX then maxX = px end
-			if py < minY then minY = py end
-			if py > maxY then maxY = py end
+		)
+		if point.Z <= 0 then
+			behind = true
+		else
+			if point.X < minX then minX = point.X end
+			if point.X > maxX then maxX = point.X end
+			if point.Y < minY then minY = point.Y end
+			if point.Y > maxY then maxY = point.Y end
 		end
 	end
 
-	if not anyFront then
-		self:SetVisible(false)
-		return
+	if behind then
+		local pps = (viewport.Y * 0.5) / math.tan(math.rad(camera.FieldOfView) * 0.5) / distance
+		minX = center.X - self.Size.X * pps * 0.5
+		maxX = center.X + self.Size.X * pps * 0.5
+		minY = center.Y - self.Size.Y * pps * 0.5
+		maxY = center.Y + self.Size.Y * pps * 0.5
 	end
 
-	local viewport = camera.ViewportSize
+	minX = math.floor(minX + 0.5)
+	maxX = math.floor(maxX + 0.5)
+	minY = math.floor(minY + 0.5)
+	maxY = math.floor(maxY + 0.5)
+
 	if maxX < 0 or minX > viewport.X or maxY < 0 or minY > viewport.Y then
 		self:SetVisible(false)
 		return
@@ -233,7 +312,7 @@ function Target:ApplyConfig()
 		local line = self.Lines[i]
 		line.Color = config.Color
 		line.Thickness = config.Thickness
-		line.Transparency = config.Transparency
+		line.Transparency = 1 - config.Transparency
 	end
 	self:_syncVisible()
 end
@@ -266,11 +345,9 @@ function NuclideESP.new()
 	self.Targets = {}
 	self.Running = false
 	self.PlayersBound = false
-	self.MeasureInterval = 1
 	self.Connection = nil
 	self.PlayerAddedConnection = nil
 	self.PlayerRemovingConnection = nil
-	self.LastTick = 0
 	return self
 end
 
@@ -312,11 +389,6 @@ function NuclideESP:_update()
 	if not self.Config.Enabled then
 		return
 	end
-	local now = os.clock()
-	if now - self.LastTick < self.Config.UpdateInterval then
-		return
-	end
-	self.LastTick = now
 	local camera = Workspace.CurrentCamera
 	if not camera then
 		return
@@ -418,11 +490,11 @@ function NuclideESP:SetConfig(overrides)
 		self.Config[key] = value
 	end
 	local config = self.Config
-	config.UpdateInterval = math.max(config.UpdateInterval, 0.01)
 	config.MaxDistance = math.max(config.MaxDistance, 0)
 	config.Thickness = math.clamp(config.Thickness, 1, 8)
 	config.Transparency = math.clamp(config.Transparency, 0, 1)
 	config.CornerLengthFraction = math.clamp(config.CornerLengthFraction, 0.05, 0.5)
+	config.MeasureInterval = math.max(config.MeasureInterval, 0.2)
 	for _, target in pairs(self.Targets) do
 		target:ApplyConfig()
 	end
