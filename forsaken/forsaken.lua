@@ -13,21 +13,10 @@ chamsInstance:Start()
 local killerESP = espInstance:CreateGroup("Killers")
 local survivorESP = espInstance:CreateGroup("Survivors")
 
-local generatorESP = espInstance:CreateGroup("Generators")
 local generatorChams = chamsInstance:CreateGroup("Generators")
-
 local itemESP = espInstance:CreateGroup("Items")
-local itemChams = chamsInstance:CreateGroup("Items")
 
-generatorESP:SetConfig({
-	Corner = false,
-	HealthBar = false,
-	Distance = false,
-	Nametag = false,
-	VisibleColor = Color3.fromRGB(0, 255, 255),
-	InvisibleColor = Color3.fromRGB(0, 255, 255),
-})
-
+generatorChams:SetEnabled(true)
 generatorChams:SetConfig({
 	VisibleColor = Color3.fromRGB(0, 255, 255),
 	InvisibleColor = Color3.fromRGB(0, 255, 255),
@@ -38,11 +27,6 @@ itemESP:SetConfig({
 	HealthBar = false,
 	Distance = false,
 	Nametag = true,
-	VisibleColor = Color3.fromRGB(255, 255, 0),
-	InvisibleColor = Color3.fromRGB(200, 200, 0),
-})
-
-itemChams:SetConfig({
 	VisibleColor = Color3.fromRGB(255, 255, 0),
 	InvisibleColor = Color3.fromRGB(200, 200, 0),
 })
@@ -84,7 +68,7 @@ end
 watchPlayersFolder("Killers", killerESP)
 watchPlayersFolder("Survivors", survivorESP)
 
-local function watchMapFolder(genESP, genChams, itemESP, itemChams)
+local function watchMapFolder(genChams, itemESP)
 	local currentConn = {}
 	local activeMapFolder = nil
 
@@ -93,10 +77,8 @@ local function watchMapFolder(genESP, genChams, itemESP, itemChams)
 			c:Disconnect()
 		end
 		table.clear(currentConn)
-		genESP:Clear()
 		genChams:Clear()
 		itemESP:Clear()
-		itemChams:Clear()
 		activeMapFolder = nil
 	end
 
@@ -109,21 +91,17 @@ local function watchMapFolder(genESP, genChams, itemESP, itemChams)
 
 		local function onChildAdded(child)
 			if child.Name == "Generator" then
-				genESP:Add(child)
 				genChams:Add(child)
 			elseif child.Name == "BloxyCola" or child.Name == "Medkit" then
 				itemESP:Add(child)
-				itemChams:Add(child)
 			end
 		end
 
 		local function onChildRemoved(child)
 			if child.Name == "Generator" then
-				genESP:Remove(child)
 				genChams:Remove(child)
 			elseif child.Name == "BloxyCola" or child.Name == "Medkit" then
 				itemESP:Remove(child)
-				itemChams:Remove(child)
 			end
 		end
 
@@ -161,21 +139,19 @@ local function watchMapFolder(genESP, genChams, itemESP, itemChams)
 	end)
 end
 
-watchMapFolder(generatorESP, generatorChams, itemESP, itemChams)
+watchMapFolder(generatorChams, itemESP)
 
-local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/gen2"))()
 
 local Window = Rayfield:CreateWindow({
-	Name = "Nuclide",
-	LoadingTitle = "Nuclide - Forsaken",
-	LoadingSubtitle = "The ultimate custom experience.",
-	KeySystem = false,
+	name = "Nuclide",
+	subtitle = "Forsaken Edition",
 })
 
-local KillerTab = Window:CreateTab("Killer ESP")
-local SurvivorTab = Window:CreateTab("Survivor ESP")
-local ObjectsTab = Window:CreateTab("Objects ESP")
-local MiscTab = Window:CreateTab("Misc")
+local KillerTab = Window:CreateTab({ name = "Killer ESP" })
+local SurvivorTab = Window:CreateTab({ name = "Survivor ESP" })
+local ObjectsTab = Window:CreateTab({ name = "Objects ESP" })
+local MiscTab = Window:CreateTab({ name = "Misc" })
 
 local killerConfig = {
 	Corner = true,
@@ -190,71 +166,71 @@ local killerConfig = {
 killerESP:SetConfig(killerConfig)
 
 KillerTab:CreateToggle({
-	Name = "Enable Killer ESP",
-	CurrentValue = false,
-	Callback = function(Value)
+	name = "Enable Killer ESP",
+	value = false,
+	callback = function(Value)
 		killerESP:SetEnabled(Value)
 	end,
 })
 
 KillerTab:CreateToggle({
-	Name = "Yourself",
-	CurrentValue = false,
-	Callback = function(Value)
+	name = "Yourself",
+	value = false,
+	callback = function(Value)
 		killerConfig.Yourself = Value
 		killerESP:SetConfig(killerConfig)
 	end,
 })
 
 KillerTab:CreateToggle({
-	Name = "Corner Box",
-	CurrentValue = true,
-	Callback = function(Value)
+	name = "Corner Box",
+	value = true,
+	callback = function(Value)
 		killerConfig.Corner = Value
 		killerESP:SetConfig(killerConfig)
 	end,
 })
 
 KillerTab:CreateToggle({
-	Name = "Nametag",
-	CurrentValue = true,
-	Callback = function(Value)
+	name = "Nametag",
+	value = true,
+	callback = function(Value)
 		killerConfig.Nametag = Value
 		killerESP:SetConfig(killerConfig)
 	end,
 })
 
 KillerTab:CreateToggle({
-	Name = "Health Bar",
-	CurrentValue = true,
-	Callback = function(Value)
+	name = "Health Bar",
+	value = true,
+	callback = function(Value)
 		killerConfig.HealthBar = Value
 		killerESP:SetConfig(killerConfig)
 	end,
 })
 
 KillerTab:CreateToggle({
-	Name = "Distance",
-	CurrentValue = true,
-	Callback = function(Value)
+	name = "Distance",
+	value = true,
+	callback = function(Value)
 		killerConfig.Distance = Value
 		killerESP:SetConfig(killerConfig)
 	end,
 })
 
 KillerTab:CreateColorPicker({
-	Name = "Visible Color",
-	Color = Color3.fromRGB(255, 0, 0),
-	Callback = function(Value)
+	name = "Visible Color",
+	color = Color3.fromRGB(255, 0, 0),
+	callback = function(Value)
 		killerConfig.VisibleColor = Value
 		killerESP:SetConfig(killerConfig)
 	end,
 })
 
 KillerTab:CreateColorPicker({
-	Name = "Invisible Color",
-	Color = Color3.fromRGB(150, 0, 0),
-	Callback = function(Value)
+	name = "Invisible Color",
+	color = Color3.fromRGB(150, 0, 0),
+	callback = function(Value)
 		killerConfig.InvisibleColor = Value
 		killerESP:SetConfig(killerConfig)
 	end,
@@ -273,140 +249,113 @@ local survivorConfig = {
 survivorESP:SetConfig(survivorConfig)
 
 SurvivorTab:CreateToggle({
-	Name = "Enable Survivor ESP",
-	CurrentValue = false,
-	Callback = function(Value)
+	name = "Enable Survivor ESP",
+	value = false,
+	callback = function(Value)
 		survivorESP:SetEnabled(Value)
 	end,
 })
 
 SurvivorTab:CreateToggle({
-	Name = "Yourself",
-	CurrentValue = false,
-	Callback = function(Value)
+	name = "Yourself",
+	value = false,
+	callback = function(Value)
 		survivorConfig.Yourself = Value
 		survivorESP:SetConfig(survivorConfig)
 	end,
 })
 
 SurvivorTab:CreateToggle({
-	Name = "Corner Box",
-	CurrentValue = true,
-	Callback = function(Value)
+	name = "Corner Box",
+	value = true,
+	callback = function(Value)
 		survivorConfig.Corner = Value
 		survivorESP:SetConfig(survivorConfig)
 	end,
 })
 
 SurvivorTab:CreateToggle({
-	Name = "Nametag",
-	CurrentValue = true,
-	Callback = function(Value)
+	name = "Nametag",
+	value = true,
+	callback = function(Value)
 		survivorConfig.Nametag = Value
 		survivorESP:SetConfig(survivorConfig)
 	end,
 })
 
 SurvivorTab:CreateToggle({
-	Name = "Health Bar",
-	CurrentValue = true,
-	Callback = function(Value)
+	name = "Health Bar",
+	value = true,
+	callback = function(Value)
 		survivorConfig.HealthBar = Value
 		survivorESP:SetConfig(survivorConfig)
 	end,
 })
 
 SurvivorTab:CreateToggle({
-	Name = "Distance",
-	CurrentValue = true,
-	Callback = function(Value)
+	name = "Distance",
+	value = true,
+	callback = function(Value)
 		survivorConfig.Distance = Value
 		survivorESP:SetConfig(survivorConfig)
 	end,
 })
 
 SurvivorTab:CreateColorPicker({
-	Name = "Visible Color",
-	Color = Color3.fromRGB(0, 255, 0),
-	Callback = function(Value)
+	name = "Visible Color",
+	color = Color3.fromRGB(0, 255, 0),
+	callback = function(Value)
 		survivorConfig.VisibleColor = Value
 		survivorESP:SetConfig(survivorConfig)
 	end,
 })
 
 SurvivorTab:CreateColorPicker({
-	Name = "Invisible Color",
-	Color = Color3.fromRGB(0, 150, 0),
-	Callback = function(Value)
+	name = "Invisible Color",
+	color = Color3.fromRGB(0, 150, 0),
+	callback = function(Value)
 		survivorConfig.InvisibleColor = Value
 		survivorESP:SetConfig(survivorConfig)
 	end,
 })
 
 ObjectsTab:CreateToggle({
-	Name = "Generator Nametag",
-	CurrentValue = false,
-	Callback = function(Value)
-		generatorESP:SetEnabled(Value)
-	end,
-})
-
-ObjectsTab:CreateToggle({
-	Name = "Generator Chams",
-	CurrentValue = false,
-	Callback = function(Value)
-		generatorChams:SetEnabled(Value)
-	end,
-})
-
-ObjectsTab:CreateToggle({
-	Name = "Items Nametag",
-	CurrentValue = false,
-	Callback = function(Value)
+	name = "Items Nametag",
+	value = false,
+	callback = function(Value)
 		itemESP:SetEnabled(Value)
 	end,
 })
 
-ObjectsTab:CreateToggle({
-	Name = "Items Chams",
-	CurrentValue = false,
-	Callback = function(Value)
-		itemChams:SetEnabled(Value)
-	end,
-})
-
 ObjectsTab:CreateColorPicker({
-	Name = "Generator Color",
-	Color = Color3.fromRGB(0, 255, 255),
-	Callback = function(Value)
-		generatorESP:SetConfig({ VisibleColor = Value, InvisibleColor = Value })
+	name = "Generator Color",
+	color = Color3.fromRGB(0, 255, 255),
+	callback = function(Value)
 		generatorChams:SetConfig({ VisibleColor = Value, InvisibleColor = Value })
 	end,
 })
 
 ObjectsTab:CreateColorPicker({
-	Name = "Items Visible Color",
-	Color = Color3.fromRGB(255, 255, 0),
-	Callback = function(Value)
+	name = "Items Visible Color",
+	color = Color3.fromRGB(255, 255, 0),
+	callback = function(Value)
 		itemESP:SetConfig({ VisibleColor = Value })
-		itemChams:SetConfig({ VisibleColor = Value })
 	end
 })
 
 ObjectsTab:CreateColorPicker({
-	Name = "Items Invisible Color",
-	Color = Color3.fromRGB(200, 200, 0),
-	Callback = function(Value)
+	name = "Items Invisible Color",
+	color = Color3.fromRGB(200, 200, 0),
+	callback = function(Value)
 		itemESP:SetConfig({ InvisibleColor = Value })
-		itemChams:SetConfig({ InvisibleColor = Value })
 	end
 })
 
 MiscTab:CreateButton({
-	Name = "Unload",
-	Callback = function()
+	name = "Unload",
+	callback = function()
 		espInstance:Destroy()
 		chamsInstance:Destroy()
-		Rayfield:Destroy()
+		Window:Unload()
 	end,
 })
