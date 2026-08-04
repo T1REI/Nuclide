@@ -3,12 +3,16 @@ local Workspace = game:GetService("Workspace")
 
 local ESPClass = loadstring(game:HttpGet("https://raw.githubusercontent.com/T1REI/Nuclide/refs/heads/main/Modules/ESP.lua?t=" .. os.time()))()
 local ChamsClass = loadstring(game:HttpGet("https://raw.githubusercontent.com/T1REI/Nuclide/refs/heads/main/Modules/Chams.lua?t=" .. os.time()))()
+local AutoGeneratorClass = loadstring(game:HttpGet("https://raw.githubusercontent.com/T1REI/Nuclide/refs/heads/main/Modules/AutoGenerator.lua?t=" .. os.time()))()
 
 local espInstance = ESPClass.new()
 espInstance:Start()
 
 local chamsInstance = ChamsClass.new()
 chamsInstance:Start()
+
+local autoGen = AutoGeneratorClass.new()
+autoGen:Start()
 
 local killerESP = espInstance:CreateGroup("Killers")
 local survivorESP = espInstance:CreateGroup("Survivors")
@@ -156,6 +160,7 @@ local Window = Rayfield:CreateWindow({
 local KillerTab = Window:CreateTab({ name = "Killer ESP" })
 local SurvivorTab = Window:CreateTab({ name = "Survivor ESP" })
 local ObjectsTab = Window:CreateTab({ name = "Objects ESP" })
+local TasksTab = Window:CreateTab({ name = "Tasks" })
 local MiscTab = Window:CreateTab({ name = "Misc" })
 
 local killerConfig = {
@@ -385,6 +390,75 @@ ObjectsTab:CreateColorPicker({
 	end
 })
 
+TasksTab:CreateSection("Auto Generator")
+
+local autoGenToggle = TasksTab:CreateToggle({
+	name = "Auto Generator",
+	flag = "AutoGenEnabled",
+	value = false,
+	callback = function(Value)
+		autoGen:SetEnabled(Value)
+		if Value then
+			Window:Notify({ title = "Tasks", content = "Auto Generator enabled" })
+		else
+			Window:Notify({ title = "Tasks", content = "Auto Generator disabled" })
+		end
+	end,
+})
+
+TasksTab:CreateSlider({
+	name = "Delay per stage tick (ms)",
+	flag = "AutoGenDelay",
+	min = 1,
+	max = 1000,
+	increment = 1,
+	suffix = "ms",
+	value = 100,
+	callback = function(Value)
+		autoGen:SetDelay(Value)
+	end,
+})
+
+TasksTab:CreateButton({
+	name = "Reset Statistics",
+	callback = function()
+		autoGen:ResetStats()
+		Window:Notify({ title = "Tasks", content = "Statistics reset" })
+	end,
+})
+
+TasksTab:CreateSection("Statistics")
+
+local stagesLabel = TasksTab:CreateLabel("Stages completed: 0")
+local clicksLabel = TasksTab:CreateLabel("Clicks sent: 0")
+local progressLabel = TasksTab:CreateLabel("Current progress: -")
+local stageLabel = TasksTab:CreateLabel("Current stage: -")
+local clicksNextLabel = TasksTab:CreateLabel("Clicks until next stage: -")
+local clicksDoneLabel = TasksTab:CreateLabel("Clicks until done: -")
+local insideLabel = TasksTab:CreateLabel("Inside generator: No")
+
+task.spawn(function()
+	while true do
+		task.wait(0.25)
+		local stats = autoGen:GetStats()
+		stagesLabel:Set("Stages completed: " .. tostring(stats.stagesCompleted))
+		clicksLabel:Set("Clicks sent: " .. tostring(stats.clicksSent))
+		if stats.currentGenerator and stats.progress then
+			progressLabel:Set(string.format("Current progress: %d%%", stats.progress))
+			stageLabel:Set("Current stage: " .. tostring(stats.stage) .. "/4")
+			clicksNextLabel:Set("Clicks until next stage: " .. tostring(stats.clicksUntilNextStage))
+			clicksDoneLabel:Set("Clicks until done: " .. tostring(stats.clicksUntilDone))
+			insideLabel:Set("Inside generator: " .. (stats.insideGenerator and "Yes" or "Approaching"))
+		else
+			progressLabel:Set("Current progress: -")
+			stageLabel:Set("Current stage: -")
+			clicksNextLabel:Set("Clicks until next stage: -")
+			clicksDoneLabel:Set("Clicks until done: -")
+			insideLabel:Set("Inside generator: No")
+		end
+	end
+end)
+
 local currentConfigName = "NuclideForsaken"
 
 MiscTab:CreateInput({
@@ -424,6 +498,7 @@ MiscTab:CreateButton({
 MiscTab:CreateButton({
 	name = "Unload",
 	callback = function()
+		autoGen:Stop()
 		espInstance:Destroy()
 		chamsInstance:Destroy()
 		Window:Unload()
