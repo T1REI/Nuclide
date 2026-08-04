@@ -6,6 +6,7 @@ local PROGRESS_PER_CLICK = 2
 local STAGE_THRESHOLDS = {26, 52, 78, 100}
 local INTERACT_DISTANCE = 12
 local SCAN_INTERVAL = 0.5
+local MAP_REFRESH_INTERVAL = 2
 
 local AutoGenerator = {}
 AutoGenerator.__index = AutoGenerator
@@ -26,7 +27,8 @@ function AutoGenerator.new()
 	self._connections = {}
 	self._running = false
 	self._nextScan = 0
-	self._mapWatcher = nil
+	self._nextMapRefresh = 0
+	self._lastCompletedStage = 0
 
 	return self
 end
@@ -38,6 +40,7 @@ end
 function AutoGenerator:ResetStats()
 	self.StagesCompleted = 0
 	self.ClicksSent = 0
+	self._lastCompletedStage = 0
 end
 
 function AutoGenerator:GetStats()
@@ -59,7 +62,7 @@ function AutoGenerator:Start()
 	if self._running then return end
 	self._running = true
 
-	self:_bindMap()
+	self:_refreshMap()
 
 	local conn = RunService.Heartbeat:Connect(function(dt)
 		if not self.Enabled then return end
@@ -71,7 +74,10 @@ end
 function AutoGenerator:Stop()
 	self.Enabled = false
 	self._running = false
-	self:_disconnectAll()
+	for _, c in ipairs(self._connections) do
+		c:Disconnect()
+	end
+	table.clear(self._connections)
 	self._mapFolder = nil
 	self._remotes = {RF = nil, RE = nil}
 	self._currentGenerator = nil
@@ -86,54 +92,38 @@ function AutoGenerator:SetEnabled(value)
 	end
 end
 
-function AutoGenerator:_disconnectAll()
-	for _, c in ipairs(self._connections) do
-		c:Disconnect()
+function AutoGenerator:_refreshMap()
+	local map = Workspace:FindFirstChild("Map")
+	if not map then
+		self._mapFolder = nil
+		self._remotes = {RF = nil, RE = nil}
+		return
 	end
-	table.clear(self._connections)
-	if self._mapWatcher then
-		self._mapWatcher:Disconnect()
-		self._mapWatcher = nil
+	local ingame = map:FindFirstChild("Ingame")
+	if not ingame then
+		self._mapFolder = nil
+		self._remotes = {RF = nil, RE = nil}
+		return
 	end
-end
-
-function AutoGenerator:_bindMap()
-	local function resolve()
-		local map = Workspace:FindFirstChild("Map")
-		if not map then return nil end
-		local ingame = map:FindFirstChild("Ingame")
-		if not ingame then return nil end
-		return ingame:FindFirstChild("Map")
-	end
-
-	local function onMapChanged()
-		local folder = resolve()
-		if folder == self._mapFolder then return end
-		self._mapFolder = folder
+	local mapFolder = ingame:FindFirstChild("Map")
+	if mapFolder ~= self._mapFolder then
+		self._mapFolder = mapFolder
 		self._remotes = {RF = nil, RE = nil}
 		self._currentGenerator = nil
 		self._insideGenerator = false
-		if folder then
-			self:_resolveRemotes(folder)
+		if mapFolder then
+			self:_resolveRemotes(mapFolder)
 		end
 	end
-
-	onMapChanged()
-	self._mapWatcher = Workspace.DescendantAdded:Connect(onMapChanged)
-	self._mapWatcher = Workspace.DescendantRemoved:Connect(onMapChanged)
-	task.spawn(function()
-		while self._running do
-			onMapChanged()
-			task.wait(2)
-		end
-	end)
 end
 
 function AutoGenerator:_resolveRemotes(mapFolder)
 	local children = mapFolder:GetChildren()
 	local remotesParent = children[13]
-	if not remotesParent then return end
-	local remotesFolder = remotesParent:FindFirstChild("Remotes")
+	local remotesFolder = nil
+	if remotesParent then
+		remotesFolder = remotesParent:FindFirstChild("Remotes")
+	end
 	if not remotesFolder then
 		for _, child in ipairs(children) do
 			local r = child:FindFirstChild("Remotes")
@@ -144,7 +134,10 @@ function AutoGenerator:_resolveRemotes(mapFolder)
 			end
 		end
 	end
-	if not remotesFolder then return end
+	if not remotesFolder then
+		self._remotes = {RF = nil, RE = nil}
+		return
+	end
 	self._remotes.RF = remotesFolder:FindFirstChild("RF")
 	self._remotes.RE = remotesFolder:FindFirstChild("RE")
 end
@@ -224,47 +217,60 @@ function AutoGenerator:_clicksUntilNextStage()
 			break
 		end
 	end
-	return math.ceil((target - progress) / PROGRESS_PER_CLICK)
+	return math.max(0, math.ceil((target - progress) / PROGRESS_PER_CLICK))
 end
 
 function AutoGenerator:_clicksUntilDone()
 	local progress = self:_getCurrentProgress()
 	if not progress then return 0 end
-	return math.ceil((100 - progress) / PROGRESS_PER_CLICK)
+	return math.max(0, math.ceil((100 - progress) / PROGRESS_PER_CLICK))
 end
 
 function AutoGenerator:_enterGenerator(generator)
 	if self._insideGenerator and self._currentGenerator == generator then return end
 	local rf = self._remotes.RF
 	if not rf or not generator then return end
-	local success, err = pcall(function()
+	local success = pcall(function()
 		rf:InvokeServer("Enter")
 	end)
 	if success then
 		self._insideGenerator = true
 		self._currentGenerator = generator
-	else
-		warn("[AutoGenerator] Enter failed:", err)
 	end
 end
 
 function AutoGenerator:_clickRepair()
 	local re = self._remotes.RE
 	if not re then return end
+	local beforeProgress = self:_getCurrentProgress() or 0
 	local success = pcall(function()
 		re:FireServer()
 	end)
 	if success then
 		self.ClicksSent = self.ClicksSent + 1
-		local stage = self:_getCurrentStage()
-		local progress = self:_getCurrentProgress()
-		if progress and progress % 26 < PROGRESS_PER_CLICK and progress >= 26 then
-			self.StagesCompleted = self.StagesCompleted + 1
+		local afterProgress = self:_getProgressValue(self._currentGenerator) or beforeProgress
+		local stageBefore = 0
+		for _, t in ipairs(STAGE_THRESHOLDS) do
+			if beforeProgress >= t then stageBefore = stageBefore + 1 end
+		end
+		local stageAfter = 0
+		for _, t in ipairs(STAGE_THRESHOLDS) do
+			if afterProgress >= t then stageAfter = stageAfter + 1 end
+		end
+		if stageAfter > stageBefore then
+			self.StagesCompleted = self.StagesCompleted + (stageAfter - stageBefore)
+			self._lastCompletedStage = stageAfter
 		end
 	end
 end
 
 function AutoGenerator:_tick(dt)
+	self._nextMapRefresh = self._nextMapRefresh - dt
+	if self._nextMapRefresh <= 0 then
+		self._nextMapRefresh = MAP_REFRESH_INTERVAL
+		self:_refreshMap()
+	end
+
 	self._nextScan = self._nextScan - dt
 	if self._nextScan > 0 then return end
 	self._nextScan = SCAN_INTERVAL
@@ -285,8 +291,10 @@ function AutoGenerator:_tick(dt)
 
 	local progress = self:_getProgressValue(nearest)
 	if progress == nil or progress >= 100 then
+		if self._currentGenerator == nearest and progress == 100 then
+			self._insideGenerator = false
+		end
 		self._currentGenerator = nil
-		self._insideGenerator = false
 		return
 	end
 
