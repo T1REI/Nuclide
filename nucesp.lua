@@ -225,11 +225,11 @@ function Target:Update(camera)
 
 	for i = 1, 8 do
 		local o = CORNER_OFFSETS[i]
-		local point = camera:WorldToViewportPoint(
+		local point = camera:WorldToViewportPoint(Vector3.new(
 			origin.X + right.X * o[1] + up.X * o[2] + look.X * o[3],
 			origin.Y + right.Y * o[1] + up.Y * o[2] + look.Y * o[3],
 			origin.Z + right.Z * o[1] + up.Z * o[2] + look.Z * o[3]
-		)
+		))
 		if point.Z <= 0 then
 			behind = true
 		else
