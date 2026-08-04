@@ -134,6 +134,17 @@ function ESPInstance:_measure()
 	local model = self.Model
 	if not model then return end
 
+	local cfg = self.Group.Config
+
+	if not cfg.AdaptWidth and self.Key:IsA("Player") then
+		local standardSize = Vector3.new(4, 5.5, 2)
+		if (standardSize - self.Size).Magnitude > 0.12 then
+			self.Size = standardSize
+			self.SizeVersion = self.SizeVersion + 1
+		end
+		return
+	end
+
 	if model:IsA("BasePart") then
 		self.Size = model.Size
 		self.SizeVersion = self.SizeVersion + 1
@@ -205,6 +216,11 @@ function ESPInstance:Update(camera)
 	local cfg = self.Group.Config
 	local model = self.Model
 	if not model or model.Parent == nil then
+		self:SetVisible(false)
+		return
+	end
+
+	if self.Key:IsA("Player") and not cfg.Yourself and self.Key == LocalPlayer then
 		self:SetVisible(false)
 		return
 	end
@@ -432,6 +448,8 @@ function ESPGroup.new()
 		VisibleColor = Color3.fromRGB(255, 255, 255),
 		InvisibleColor = Color3.fromRGB(255, 0, 0),
 		MaxDistance = 5000,
+		Yourself = false,
+		AdaptWidth = true,
 	}
 	return self
 end

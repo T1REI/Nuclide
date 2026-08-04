@@ -39,12 +39,12 @@ itemESP:SetConfig({
 	Distance = false,
 	Nametag = true,
 	VisibleColor = Color3.fromRGB(255, 255, 0),
-	InvisibleColor = Color3.fromRGB(255, 255, 0),
+	InvisibleColor = Color3.fromRGB(200, 200, 0),
 })
 
 itemChams:SetConfig({
 	VisibleColor = Color3.fromRGB(255, 255, 0),
-	InvisibleColor = Color3.fromRGB(255, 255, 0),
+	InvisibleColor = Color3.fromRGB(200, 200, 0),
 })
 
 local function watchPlayersFolder(folderName, espGroup)
@@ -170,6 +170,8 @@ local killerConfig = {
 	Distance = true,
 	VisibleColor = Color3.fromRGB(255, 0, 0),
 	InvisibleColor = Color3.fromRGB(150, 0, 0),
+	Yourself = false,
+	AdaptWidth = true,
 }
 killerESP:SetConfig(killerConfig)
 
@@ -178,6 +180,24 @@ KillerTab:CreateToggle({
 	CurrentValue = false,
 	Callback = function(Value)
 		killerESP:SetEnabled(Value)
+	end,
+})
+
+KillerTab:CreateToggle({
+	Name = "Yourself",
+	CurrentValue = false,
+	Callback = function(Value)
+		killerConfig.Yourself = Value
+		killerESP:SetConfig(killerConfig)
+	end,
+})
+
+KillerTab:CreateToggle({
+	Name = "Adapt Width",
+	CurrentValue = true,
+	Callback = function(Value)
+		killerConfig.AdaptWidth = Value
+		killerESP:SetConfig(killerConfig)
 	end,
 })
 
@@ -242,6 +262,8 @@ local survivorConfig = {
 	Distance = true,
 	VisibleColor = Color3.fromRGB(0, 255, 0),
 	InvisibleColor = Color3.fromRGB(0, 150, 0),
+	Yourself = false,
+	AdaptWidth = true,
 }
 survivorESP:SetConfig(survivorConfig)
 
@@ -250,6 +272,24 @@ SurvivorTab:CreateToggle({
 	CurrentValue = false,
 	Callback = function(Value)
 		survivorESP:SetEnabled(Value)
+	end,
+})
+
+SurvivorTab:CreateToggle({
+	Name = "Yourself",
+	CurrentValue = false,
+	Callback = function(Value)
+		survivorConfig.Yourself = Value
+		survivorESP:SetConfig(survivorConfig)
+	end,
+})
+
+SurvivorTab:CreateToggle({
+	Name = "Adapt Width",
+	CurrentValue = true,
+	Callback = function(Value)
+		survivorConfig.AdaptWidth = Value
+		survivorESP:SetConfig(survivorConfig)
 	end,
 })
 
@@ -349,11 +389,20 @@ ObjectsTab:CreateColorPicker({
 })
 
 ObjectsTab:CreateColorPicker({
-	Name = "Items Color",
+	Name = "Items Visible Color",
 	Color = Color3.fromRGB(255, 255, 0),
 	Callback = function(Value)
-		itemESP:SetConfig({ VisibleColor = Value, InvisibleColor = Value })
-		itemChams:SetConfig({ VisibleColor = Value, InvisibleColor = Value })
+		itemESP:SetConfig({ VisibleColor = Value })
+		itemChams:SetConfig({ VisibleColor = Value })
+	end,
+})
+
+ObjectsTab:CreateColorPicker({
+	Name = "Items Invisible Color",
+	Color = Color3.fromRGB(200, 200, 0),
+	Callback = function(Value)
+		itemESP:SetConfig({ InvisibleColor = Value })
+		itemChams:SetConfig({ InvisibleColor = Value })
 	end,
 })
 
