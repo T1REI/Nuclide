@@ -87,7 +87,7 @@ EspTab:CreateSlider({
 	Range = { 1, 5 },
 	Increment = 1,
 	Suffix = "px",
-	CurrentValue = ESP and ESP.Config.Thickness or 2,
+	CurrentValue = ESP and ESP.Config.Thickness or 1,
 	Callback = function(Value)
 		if not ESP then return end
 		ESP:SetConfig({ Thickness = Value })

@@ -9,6 +9,8 @@ local CORNER_OFFSETS = {
 	{ -1, -1, 1 }, { 1, -1, 1 }, { 1, 1, 1 }, { -1, 1, 1 },
 }
 
+local GRADIENT_SEGMENTS = 8
+
 local DEFAULT_CONFIG = {
 	Enabled = false,
 	Corner = true,
@@ -17,7 +19,7 @@ local DEFAULT_CONFIG = {
 	TeamCheck = false,
 	VisibleColor = Color3.fromRGB(255, 255, 255),
 	InvisibleColor = Color3.fromRGB(255, 80, 80),
-	Thickness = 2,
+	Thickness = 1,
 	Transparency = 0,
 	HealthBar = true,
 	HealthText = true,
@@ -30,14 +32,14 @@ local DEFAULT_CONFIG = {
 	TextSize = 13,
 }
 
-local RaycastParamsCache = nil
+local RaycastCache = nil
 local function getRaycastParams()
-	if not RaycastParamsCache then
-		RaycastParamsCache = RaycastParams.new()
-		RaycastParamsCache.FilterType = Enum.RaycastFilterType.Exclude
-		RaycastParamsCache.IgnoreWater = true
+	if not RaycastCache then
+		RaycastCache = RaycastParams.new()
+		RaycastCache.FilterType = Enum.RaycastFilterType.Exclude
+		RaycastCache.IgnoreWater = true
 	end
-	return RaycastParamsCache
+	return RaycastCache
 end
 
 local function isAccessoryDescendant(part, model)
@@ -75,6 +77,7 @@ function Target.new(manager, key, isPlayer)
 	self.IsRayVisible = true
 	self.CurrentColor = manager.Config.VisibleColor
 	self.Lines = {}
+	self.HealthFills = {}
 	self.Connections = {}
 	if Drawing then
 		local cfg = manager.Config
@@ -93,20 +96,21 @@ function Target.new(manager, key, isPlayer)
 		self.HealthBg.Transparency = trans
 		self.HealthBg.Visible = false
 
-		self.HealthFill = Drawing.new("Line")
-		self.HealthFill.Thickness = cfg.HealthBarWidth
-		self.HealthFill.Transparency = trans
-		self.HealthFill.Color = Color3.fromRGB(0, 255, 0)
-		self.HealthFill.Visible = false
+		for i = 1, GRADIENT_SEGMENTS do
+			local l = Drawing.new("Line")
+			l.Thickness = cfg.HealthBarWidth
+			l.Transparency = trans
+			l.Visible = false
+			self.HealthFills[i] = l
+		end
 
 		self.HealthText = Drawing.new("Text")
 		self.HealthText.Size = cfg.TextSize
-		self.HealthText.Color = Color3.fromRGB(255, 255, 255)
+		self.HealthText.Color = cfg.VisibleColor
 		self.HealthText.Outline = true
 		self.HealthText.OutlineColor = Color3.fromRGB(0, 0, 0)
 		self.HealthText.Transparency = trans
 		self.HealthText.Visible = false
-		self.HealthText.Center = false
 
 		self.NameTag = Drawing.new("Text")
 		self.NameTag.Size = cfg.TextSize
@@ -115,16 +119,14 @@ function Target.new(manager, key, isPlayer)
 		self.NameTag.OutlineColor = Color3.fromRGB(0, 0, 0)
 		self.NameTag.Transparency = trans
 		self.NameTag.Visible = false
-		self.NameTag.Center = false
 
 		self.DistanceTag = Drawing.new("Text")
 		self.DistanceTag.Size = math.max(cfg.TextSize - 1, 11)
-		self.DistanceTag.Color = Color3.fromRGB(200, 200, 200)
+		self.DistanceTag.Color = cfg.VisibleColor
 		self.DistanceTag.Outline = true
 		self.DistanceTag.OutlineColor = Color3.fromRGB(0, 0, 0)
 		self.DistanceTag.Transparency = trans
 		self.DistanceTag.Visible = false
-		self.DistanceTag.Center = false
 	end
 	if self.Player then
 		local pl = self.Player
@@ -429,19 +431,41 @@ function Target:Update(camera)
 
 	if cfg.HealthBar and self.Humanoid then
 		local barW = cfg.HealthBarWidth
-		local bx = minX - 7 - barW
-		local byMid = bx + barW * 0.5
-		self.HealthBg.From = Vector2.new(byMid, minY)
-		self.HealthBg.To = Vector2.new(byMid, maxY)
+		local xmid = minX - 7 - barW + barW * 0.5
+		self.HealthBg.From = Vector2.new(xmid, minY)
+		self.HealthBg.To = Vector2.new(xmid, maxY)
 		self.HealthBg.Thickness = barW + 2
 		self.HealthBg.Transparency = trans
 
 		local frac = math.clamp(self.Humanoid.Health / self.Humanoid.MaxHealth, 0, 1)
-		self.HealthFill.From = Vector2.new(byMid, maxY)
-		self.HealthFill.To = Vector2.new(byMid, maxY - height * frac)
-		self.HealthFill.Thickness = barW
-		self.HealthFill.Transparency = trans
-		self.HealthFill.Color = Color3.fromRGB(255, 60, 60):Lerp(Color3.fromRGB(80, 255, 80), frac)
+		local totalH = maxY - minY
+		local fillH = totalH * frac
+		local fillTop = maxY - fillH
+		local segH = totalH / GRADIENT_SEGMENTS
+
+		local light = chosen:Lerp(Color3.new(1, 1, 1), 0.45)
+		local dark = chosen:Lerp(Color3.new(0, 0, 0), 0.45)
+
+		for j = 0, GRADIENT_SEGMENTS - 1 do
+			local line = self.HealthFills[j + 1]
+			local bottomY = maxY - j * segH
+			local topY = maxY - (j + 1) * segH
+			if bottomY <= fillTop then
+				line.Visible = false
+			else
+				local clippedTop = math.max(topY, fillTop)
+				line.From = Vector2.new(xmid, bottomY)
+				line.To = Vector2.new(xmid, clippedTop)
+				local t = j / (GRADIENT_SEGMENTS - 1)
+				line.Color = dark:Lerp(light, t)
+				line.Thickness = barW
+				line.Transparency = trans
+			end
+		end
+	else
+		for i = 1, GRADIENT_SEGMENTS do
+			self.HealthFills[i].Visible = false
+		end
 	end
 
 	if cfg.HealthText and self.Humanoid then
@@ -449,6 +473,7 @@ function Target:Update(camera)
 		local b = self.HealthText.TextBounds
 		local bx = minX - 7 - cfg.HealthBarWidth
 		self.HealthText.Position = Vector2.new(bx - b.X - 3, (minY + maxY) * 0.5 - b.Y * 0.5)
+		self.HealthText.Color = chosen
 		self.HealthText.Transparency = trans
 	end
 
@@ -466,6 +491,7 @@ function Target:Update(camera)
 		self.DistanceTag.Text = string.format("%dm", math.floor(dist + 0.5))
 		local b = self.DistanceTag.TextBounds
 		self.DistanceTag.Position = Vector2.new((minX + maxX) * 0.5 - b.X * 0.5, maxY + 2)
+		self.DistanceTag.Color = chosen
 		self.DistanceTag.Transparency = trans
 	end
 
@@ -484,7 +510,12 @@ function Target:_syncVisible()
 	local cfg = self.Manager.Config
 	local show = self.Visible and cfg.Enabled
 	self.HealthBg.Visible = show and cfg.HealthBar and self.Humanoid ~= nil
-	self.HealthFill.Visible = show and cfg.HealthBar and self.Humanoid ~= nil
+	for i = 1, GRADIENT_SEGMENTS do
+		local l = self.HealthFills[i]
+		if not (show and cfg.HealthBar and self.Humanoid) then
+			l.Visible = false
+		end
+	end
 	self.HealthText.Visible = show and cfg.HealthText and self.Humanoid ~= nil
 	self.NameTag.Visible = show and cfg.Nametag
 	self.DistanceTag.Visible = show and cfg.Distance
@@ -493,12 +524,13 @@ function Target:_syncVisible()
 	for i = 1, 8 do
 		self.Lines[i].Visible = boxShow
 	end
-	if show and cfg.Corner then
+	if show then
 		for i = 1, 8 do
 			self.Lines[i].Color = self.CurrentColor
 		end
 		self.NameTag.Color = self.CurrentColor
 		self.DistanceTag.Color = self.CurrentColor
+		self.HealthText.Color = self.CurrentColor
 	end
 end
 
@@ -515,14 +547,19 @@ function Target:ApplyConfig()
 	end
 	self.HealthBg.Thickness = cfg.HealthBarWidth + 2
 	self.HealthBg.Transparency = trans
-	self.HealthFill.Thickness = cfg.HealthBarWidth
-	self.HealthFill.Transparency = trans
+	for i = 1, GRADIENT_SEGMENTS do
+		self.HealthFills[i].Thickness = cfg.HealthBarWidth
+		self.HealthFills[i].Transparency = trans
+	end
 	self.HealthText.Size = cfg.TextSize
 	self.HealthText.Transparency = trans
+	self.HealthText.Color = self.CurrentColor
 	self.NameTag.Size = cfg.TextSize
 	self.NameTag.Transparency = trans
+	self.NameTag.Color = self.CurrentColor
 	self.DistanceTag.Size = math.max(cfg.TextSize - 1, 11)
 	self.DistanceTag.Transparency = trans
+	self.DistanceTag.Color = self.CurrentColor
 	self:_syncVisible()
 end
 
@@ -536,12 +573,15 @@ function Target:Destroy()
 			self.Lines[i]:Remove()
 		end
 		self.HealthBg:Remove()
-		self.HealthFill:Remove()
+		for i = 1, GRADIENT_SEGMENTS do
+			self.HealthFills[i]:Remove()
+		end
 		self.HealthText:Remove()
 		self.NameTag:Remove()
 		self.DistanceTag:Remove()
 	end
 	table.clear(self.Lines)
+	table.clear(self.HealthFills)
 end
 
 local NuclideESP = {}
@@ -641,14 +681,12 @@ function NuclideESP:TrackPlayers()
 		return self
 	end
 	self.PlayersBound = true
-
 	local function bind(pl)
 		if self.Targets[pl] then
 			return
 		end
 		self.Targets[pl] = Target.new(self, pl, true)
 	end
-
 	for _, pl in ipairs(Players:GetPlayers()) do
 		bind(pl)
 	end
