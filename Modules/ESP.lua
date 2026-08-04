@@ -136,8 +136,8 @@ function ESPInstance:_measure()
 
 	local cfg = self.Group.Config
 
-	if not cfg.AdaptWidth and self.Key:IsA("Player") then
-		local standardSize = Vector3.new(4, 5.5, 2)
+	if not cfg.AdaptWidth and (self.Key:IsA("Player") or self.Humanoid) then
+		local standardSize = Vector3.new(2.2, 5.5, 1.5)
 		if (standardSize - self.Size).Magnitude > 0.12 then
 			self.Size = standardSize
 			self.SizeVersion = self.SizeVersion + 1
@@ -192,17 +192,17 @@ function ESPInstance:_measure()
 
 	if not found then return end
 
-	local sx = maxX - minX
+	local sx = (maxX - minX) * 0.65
 	local sy = maxY - minY
-	local sz = maxZ - minZ
+	local sz = (maxZ - minZ) * 0.65
 	if sx < 0.01 or sy < 0.01 or sz < 0.01 then return end
 
 	local size = Vector3.new(sx, sy, sz)
-	if self.Key:IsA("Player") then
+	if self.Key:IsA("Player") or self.Humanoid then
 		size = Vector3.new(
-			math.clamp(size.X, 2, 4.5),
-			math.clamp(size.Y, 3, 7.5),
-			math.clamp(size.Z, 1, 3.5)
+			math.clamp(size.X, 1.2, 2.5),
+			math.clamp(size.Y, 3.5, 6.5),
+			math.clamp(size.Z, 1.0, 2.0)
 		)
 	end
 
@@ -223,6 +223,17 @@ function ESPInstance:Update(camera)
 	if self.Key:IsA("Player") and not cfg.Yourself and self.Key == LocalPlayer then
 		self:SetVisible(false)
 		return
+	end
+
+	if not self.RootPart or self.RootPart.Parent == nil then
+		self.RootPart = model:IsA("BasePart") and model 
+			or model.PrimaryPart 
+			or model:FindFirstChild("HumanoidRootPart") 
+			or model:FindFirstChildOfClass("BasePart")
+	end
+
+	if not self.Humanoid or self.Humanoid.Parent == nil then
+		self.Humanoid = model:FindFirstChildOfClass("Humanoid")
 	end
 
 	local now = os.clock()

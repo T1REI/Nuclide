@@ -30,14 +30,6 @@ function ChamsInstance.new(group, key)
 
 	self.Highlight = Instance.new("Highlight")
 	self.Highlight.Enabled = false
-	pcall(function()
-		self.Highlight.Parent = game:GetService("CoreGui")
-	end)
-	if not self.Highlight.Parent then
-		pcall(function()
-			self.Highlight.Parent = Workspace
-		end)
-	end
 
 	if key:IsA("Player") then
 		table.insert(self.Connections, key.CharacterAdded:Connect(function(ch)
@@ -62,13 +54,17 @@ function ChamsInstance:Bind(model)
 		or model.PrimaryPart 
 		or model:FindFirstChild("HumanoidRootPart") 
 		or model:FindFirstChildOfClass("BasePart")
-	self.Highlight.Adornee = model
+	pcall(function()
+		self.Highlight.Parent = model
+	end)
 end
 
 function ChamsInstance:Unbind()
 	self.Model = nil
 	self.RootPart = nil
-	self.Highlight.Adornee = nil
+	pcall(function()
+		self.Highlight.Parent = nil
+	end)
 	self:SetVisible(false)
 end
 
@@ -78,6 +74,13 @@ function ChamsInstance:Update(camera)
 	if not model or model.Parent == nil then
 		self:SetVisible(false)
 		return
+	end
+
+	if not self.RootPart or self.RootPart.Parent == nil then
+		self.RootPart = model:IsA("BasePart") and model 
+			or model.PrimaryPart 
+			or model:FindFirstChild("HumanoidRootPart") 
+			or model:FindFirstChildOfClass("BasePart")
 	end
 
 	local origin = self.RootPart and self.RootPart.Position
@@ -113,7 +116,13 @@ end
 
 function ChamsInstance:SetVisible(v)
 	self.Visible = v
-	self.Highlight.Enabled = v and self.Group.Enabled
+	local show = v and self.Group.Enabled
+	self.Highlight.Enabled = show
+	if show and self.Model and self.Highlight.Parent ~= self.Model then
+		pcall(function()
+			self.Highlight.Parent = self.Model
+		end)
+	end
 end
 
 function ChamsInstance:Destroy()

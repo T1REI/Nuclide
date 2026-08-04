@@ -23,7 +23,7 @@ generatorESP:SetConfig({
 	Corner = false,
 	HealthBar = false,
 	Distance = false,
-	Nametag = true,
+	Nametag = false,
 	VisibleColor = Color3.fromRGB(0, 255, 255),
 	InvisibleColor = Color3.fromRGB(0, 255, 255),
 })
@@ -394,7 +394,7 @@ ObjectsTab:CreateColorPicker({
 	Callback = function(Value)
 		itemESP:SetConfig({ VisibleColor = Value })
 		itemChams:SetConfig({ VisibleColor = Value })
-	end,
+	end
 })
 
 ObjectsTab:CreateColorPicker({
@@ -403,7 +403,7 @@ ObjectsTab:CreateColorPicker({
 	Callback = function(Value)
 		itemESP:SetConfig({ InvisibleColor = Value })
 		itemChams:SetConfig({ InvisibleColor = Value })
-	end,
+	end
 })
 
 MiscTab:CreateButton({
