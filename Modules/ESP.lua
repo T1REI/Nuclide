@@ -434,7 +434,7 @@ function ESPGroup.new()
 		MaxDistance = 5000,
 	}
 	return self
-}
+end
 
 function ESPGroup:Add(key)
 	if self.Targets[key] then return end
