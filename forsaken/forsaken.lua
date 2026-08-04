@@ -401,11 +401,11 @@ TasksTab:CreateToggle({
 		if Value then
 			local diag = autoGen:Diagnostics()
 			local msg = string.format(
-				"Map: %s | RF: %s | RE: %s | Generators: %d",
-				diag.mapLoaded and "OK" or "not loaded",
-				diag.rfFound and "OK" or "NOT FOUND",
-				diag.reFound and "OK" or "NOT FOUND",
-				diag.generatorCount
+				"Map: %s | Generators: %d | Target: %s\nStatus: %s",
+				diag.mapLoaded and "OK" or "NOT LOADED",
+				diag.generatorCount,
+				diag.hasTarget and "found" or "none",
+				diag.lastError
 			)
 			Window:Notify({ title = "Auto Generator", content = msg, duration = 5 })
 		end
@@ -436,13 +436,14 @@ TasksTab:CreateButton({
 	callback = function()
 		local diag = autoGen:Diagnostics()
 		local msg = string.format(
-			"Map: %s\nRF remote: %s\nRE remote: %s\nGenerators on map: %d\nActive target: %s\nInside generator: %s",
+			"Map: %s\nGenerators on map: %d\nTarget found: %s\nGenerator remotes (RF/RE): %s / %s\nInside repairing state: %s\nLast status: %s",
 			diag.mapLoaded and "Loaded" or "Not loaded",
-			diag.rfFound and "Found" or "Not found",
-			diag.reFound and "Found" or "Not found",
 			diag.generatorCount,
-			diag.currentGenerator and "Yes" or "No",
-			diag.inside and "Yes" or "No"
+			diag.hasTarget and "Yes" or "No",
+			diag.rfFound and "OK" or "NOT FOUND",
+			diag.reFound and "OK" or "NOT FOUND",
+			diag.inside and "Yes" or "No",
+			diag.lastError
 		)
 		Window:Notify({ title = "Diagnostics", content = msg, duration = 8 })
 	end,
