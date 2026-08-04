@@ -16,7 +16,7 @@ local survivorESP = espInstance:CreateGroup("Survivors")
 local generatorChams = chamsInstance:CreateGroup("Generators")
 local itemESP = espInstance:CreateGroup("Items")
 
-generatorChams:SetEnabled(true)
+generatorChams:SetEnabled(false)
 generatorChams:SetConfig({
 	VisibleColor = Color3.fromRGB(0, 255, 255),
 	InvisibleColor = Color3.fromRGB(0, 255, 255),
@@ -145,7 +145,12 @@ local Rayfield = loadstring(game:HttpGet("https://sirius.menu/gen2"))()
 
 local Window = Rayfield:CreateWindow({
 	name = "Nuclide",
-	subtitle = "Forsaken Edition",
+	subtitle = "Forsaken - 0.0.1",
+	configuration = {
+		autoSave = false,
+		autoLoad = false,
+		fileName = "NuclideForsaken",
+	},
 })
 
 local KillerTab = Window:CreateTab({ name = "Killer ESP" })
@@ -167,6 +172,7 @@ killerESP:SetConfig(killerConfig)
 
 KillerTab:CreateToggle({
 	name = "Enable Killer ESP",
+	flag = "KillerEnabled",
 	value = false,
 	callback = function(Value)
 		killerESP:SetEnabled(Value)
@@ -175,6 +181,7 @@ KillerTab:CreateToggle({
 
 KillerTab:CreateToggle({
 	name = "Yourself",
+	flag = "KillerYourself",
 	value = false,
 	callback = function(Value)
 		killerConfig.Yourself = Value
@@ -184,6 +191,7 @@ KillerTab:CreateToggle({
 
 KillerTab:CreateToggle({
 	name = "Corner Box",
+	flag = "KillerCorner",
 	value = true,
 	callback = function(Value)
 		killerConfig.Corner = Value
@@ -193,6 +201,7 @@ KillerTab:CreateToggle({
 
 KillerTab:CreateToggle({
 	name = "Nametag",
+	flag = "KillerNametag",
 	value = true,
 	callback = function(Value)
 		killerConfig.Nametag = Value
@@ -202,6 +211,7 @@ KillerTab:CreateToggle({
 
 KillerTab:CreateToggle({
 	name = "Health Bar",
+	flag = "KillerHealthBar",
 	value = true,
 	callback = function(Value)
 		killerConfig.HealthBar = Value
@@ -211,6 +221,7 @@ KillerTab:CreateToggle({
 
 KillerTab:CreateToggle({
 	name = "Distance",
+	flag = "KillerDistance",
 	value = true,
 	callback = function(Value)
 		killerConfig.Distance = Value
@@ -220,6 +231,7 @@ KillerTab:CreateToggle({
 
 KillerTab:CreateColorPicker({
 	name = "Visible Color",
+	flag = "KillerVisColor",
 	color = Color3.fromRGB(255, 0, 0),
 	callback = function(Value)
 		killerConfig.VisibleColor = Value
@@ -229,6 +241,7 @@ KillerTab:CreateColorPicker({
 
 KillerTab:CreateColorPicker({
 	name = "Invisible Color",
+	flag = "KillerInvisColor",
 	color = Color3.fromRGB(150, 0, 0),
 	callback = function(Value)
 		killerConfig.InvisibleColor = Value
@@ -250,6 +263,7 @@ survivorESP:SetConfig(survivorConfig)
 
 SurvivorTab:CreateToggle({
 	name = "Enable Survivor ESP",
+	flag = "SurvivorEnabled",
 	value = false,
 	callback = function(Value)
 		survivorESP:SetEnabled(Value)
@@ -258,6 +272,7 @@ SurvivorTab:CreateToggle({
 
 SurvivorTab:CreateToggle({
 	name = "Yourself",
+	flag = "SurvivorYourself",
 	value = false,
 	callback = function(Value)
 		survivorConfig.Yourself = Value
@@ -267,6 +282,7 @@ SurvivorTab:CreateToggle({
 
 SurvivorTab:CreateToggle({
 	name = "Corner Box",
+	flag = "SurvivorCorner",
 	value = true,
 	callback = function(Value)
 		survivorConfig.Corner = Value
@@ -276,6 +292,7 @@ SurvivorTab:CreateToggle({
 
 SurvivorTab:CreateToggle({
 	name = "Nametag",
+	flag = "SurvivorNametag",
 	value = true,
 	callback = function(Value)
 		survivorConfig.Nametag = Value
@@ -285,6 +302,7 @@ SurvivorTab:CreateToggle({
 
 SurvivorTab:CreateToggle({
 	name = "Health Bar",
+	flag = "SurvivorHealthBar",
 	value = true,
 	callback = function(Value)
 		survivorConfig.HealthBar = Value
@@ -294,6 +312,7 @@ SurvivorTab:CreateToggle({
 
 SurvivorTab:CreateToggle({
 	name = "Distance",
+	flag = "SurvivorDistance",
 	value = true,
 	callback = function(Value)
 		survivorConfig.Distance = Value
@@ -303,6 +322,7 @@ SurvivorTab:CreateToggle({
 
 SurvivorTab:CreateColorPicker({
 	name = "Visible Color",
+	flag = "SurvivorVisColor",
 	color = Color3.fromRGB(0, 255, 0),
 	callback = function(Value)
 		survivorConfig.VisibleColor = Value
@@ -312,6 +332,7 @@ SurvivorTab:CreateColorPicker({
 
 SurvivorTab:CreateColorPicker({
 	name = "Invisible Color",
+	flag = "SurvivorInvisColor",
 	color = Color3.fromRGB(0, 150, 0),
 	callback = function(Value)
 		survivorConfig.InvisibleColor = Value
@@ -320,7 +341,17 @@ SurvivorTab:CreateColorPicker({
 })
 
 ObjectsTab:CreateToggle({
+	name = "Generator Chams",
+	flag = "GeneratorChamsEnabled",
+	value = false,
+	callback = function(Value)
+		generatorChams:SetEnabled(Value)
+	end,
+})
+
+ObjectsTab:CreateToggle({
 	name = "Items Nametag",
+	flag = "ItemsNametagEnabled",
 	value = false,
 	callback = function(Value)
 		itemESP:SetEnabled(Value)
@@ -329,6 +360,7 @@ ObjectsTab:CreateToggle({
 
 ObjectsTab:CreateColorPicker({
 	name = "Generator Color",
+	flag = "GeneratorColor",
 	color = Color3.fromRGB(0, 255, 255),
 	callback = function(Value)
 		generatorChams:SetConfig({ VisibleColor = Value, InvisibleColor = Value })
@@ -337,6 +369,7 @@ ObjectsTab:CreateColorPicker({
 
 ObjectsTab:CreateColorPicker({
 	name = "Items Visible Color",
+	flag = "ItemsVisColor",
 	color = Color3.fromRGB(255, 255, 0),
 	callback = function(Value)
 		itemESP:SetConfig({ VisibleColor = Value })
@@ -345,10 +378,47 @@ ObjectsTab:CreateColorPicker({
 
 ObjectsTab:CreateColorPicker({
 	name = "Items Invisible Color",
+	flag = "ItemsInvisColor",
 	color = Color3.fromRGB(200, 200, 0),
 	callback = function(Value)
 		itemESP:SetConfig({ InvisibleColor = Value })
 	end
+})
+
+local currentConfigName = "NuclideForsaken"
+
+MiscTab:CreateInput({
+	name = "Config File Name",
+	placeholderText = "NuclideForsaken",
+	callback = function(Text)
+		if Text and Text ~= "" then
+			currentConfigName = Text
+		end
+	end,
+})
+
+MiscTab:CreateButton({
+	name = "Save Config",
+	callback = function()
+		local success = Window:Save(currentConfigName)
+		if success then
+			Window:Notify({ title = "Config System", content = "Successfully saved configuration: " .. currentConfigName })
+		else
+			Window:Notify({ title = "Config System", content = "Failed to save configuration!" })
+		end
+	end,
+})
+
+MiscTab:CreateButton({
+	name = "Load Config",
+	callback = function()
+		local success = Window:Load(currentConfigName)
+		if success then
+			Window:Notify({ title = "Config System", content = "Successfully loaded configuration: " .. currentConfigName })
+		else
+			Window:Notify({ title = "Config System", content = "Failed to load configuration! Check if file exists." })
+		end
+	end,
 })
 
 MiscTab:CreateButton({
