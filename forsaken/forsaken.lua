@@ -51,14 +51,17 @@ local function watchPlayersFolder(folderName, espGroup)
 	local players = Workspace:WaitForChild("Players", 10)
 	if not players then return end
 
-	local currentFolder = players:FindFirstChild(folderName)
+	local activeFolder = nil
 	local function bind(folder)
+		if activeFolder == folder then return end
 		espGroup:Clear()
+		activeFolder = folder
 		if folder then
 			espGroup:TrackFolder(folder)
 		end
 	end
 
+	local currentFolder = players:FindFirstChild(folderName)
 	if currentFolder then
 		bind(currentFolder)
 	end
@@ -70,7 +73,10 @@ local function watchPlayersFolder(folderName, espGroup)
 	end)
 	players.ChildRemoved:Connect(function(child)
 		if child.Name == folderName then
-			espGroup:Clear()
+			if activeFolder == child then
+				espGroup:Clear()
+				activeFolder = nil
+			end
 		end
 	end)
 end
@@ -80,6 +86,7 @@ watchPlayersFolder("Survivors", survivorESP)
 
 local function watchMapFolder(genESP, genChams, itemESP, itemChams)
 	local currentConn = {}
+	local activeMapFolder = nil
 
 	local function cleanup()
 		for _, c in ipairs(currentConn) do
@@ -90,10 +97,15 @@ local function watchMapFolder(genESP, genChams, itemESP, itemChams)
 		genChams:Clear()
 		itemESP:Clear()
 		itemChams:Clear()
+		activeMapFolder = nil
 	end
 
 	local function scan(mapFolder)
+		if activeMapFolder == mapFolder then
+			return
+		end
 		cleanup()
+		activeMapFolder = mapFolder
 
 		local function onChildAdded(child)
 			if child.Name == "Generator" then
@@ -135,7 +147,9 @@ local function watchMapFolder(genESP, genChams, itemESP, itemChams)
 				end
 			end
 		end
-		cleanup()
+		if activeMapFolder ~= nil then
+			cleanup()
+		end
 		return false
 	end
 
@@ -171,7 +185,7 @@ local killerConfig = {
 	VisibleColor = Color3.fromRGB(255, 0, 0),
 	InvisibleColor = Color3.fromRGB(150, 0, 0),
 	Yourself = false,
-	AdaptWidth = true,
+	AdaptWidth = false,
 }
 killerESP:SetConfig(killerConfig)
 
@@ -188,15 +202,6 @@ KillerTab:CreateToggle({
 	CurrentValue = false,
 	Callback = function(Value)
 		killerConfig.Yourself = Value
-		killerESP:SetConfig(killerConfig)
-	end,
-})
-
-KillerTab:CreateToggle({
-	Name = "Adapt Width",
-	CurrentValue = true,
-	Callback = function(Value)
-		killerConfig.AdaptWidth = Value
 		killerESP:SetConfig(killerConfig)
 	end,
 })
@@ -263,7 +268,7 @@ local survivorConfig = {
 	VisibleColor = Color3.fromRGB(0, 255, 0),
 	InvisibleColor = Color3.fromRGB(0, 150, 0),
 	Yourself = false,
-	AdaptWidth = true,
+	AdaptWidth = false,
 }
 survivorESP:SetConfig(survivorConfig)
 
@@ -280,15 +285,6 @@ SurvivorTab:CreateToggle({
 	CurrentValue = false,
 	Callback = function(Value)
 		survivorConfig.Yourself = Value
-		survivorESP:SetConfig(survivorConfig)
-	end,
-})
-
-SurvivorTab:CreateToggle({
-	Name = "Adapt Width",
-	CurrentValue = true,
-	Callback = function(Value)
-		survivorConfig.AdaptWidth = Value
 		survivorESP:SetConfig(survivorConfig)
 	end,
 })

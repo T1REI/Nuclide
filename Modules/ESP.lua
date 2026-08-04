@@ -30,6 +30,24 @@ local function isAccessoryDescendant(part, model)
 	return false
 end
 
+local function isLocalCharacter(model)
+	if not model then return false end
+	if LocalPlayer and model == LocalPlayer.Character then
+		return true
+	end
+	local username = LocalPlayer and LocalPlayer.Name
+	if username then
+		if model.Name == username then
+			return true
+		end
+		local attr = model:GetAttribute("Username")
+		if attr and tostring(attr) == username then
+			return true
+		end
+	end
+	return false
+end
+
 local ESPInstance = {}
 ESPInstance.__index = ESPInstance
 
@@ -135,8 +153,12 @@ function ESPInstance:_measure()
 	if not model then return end
 
 	local cfg = self.Group.Config
+	local isPlayerModel = self.Key:IsA("Player") 
+		or self.Humanoid ~= nil 
+		or model:FindFirstChildOfClass("Humanoid")
+		or model:GetAttribute("Username") ~= nil
 
-	if not cfg.AdaptWidth and (self.Key:IsA("Player") or self.Humanoid) then
+	if not cfg.AdaptWidth and isPlayerModel then
 		local standardSize = Vector3.new(2.2, 5.5, 1.5)
 		if (standardSize - self.Size).Magnitude > 0.12 then
 			self.Size = standardSize
@@ -198,7 +220,7 @@ function ESPInstance:_measure()
 	if sx < 0.01 or sy < 0.01 or sz < 0.01 then return end
 
 	local size = Vector3.new(sx, sy, sz)
-	if self.Key:IsA("Player") or self.Humanoid then
+	if isPlayerModel then
 		size = Vector3.new(
 			math.clamp(size.X, 1.2, 2.5),
 			math.clamp(size.Y, 3.5, 6.5),
@@ -220,7 +242,7 @@ function ESPInstance:Update(camera)
 		return
 	end
 
-	if self.Key:IsA("Player") and not cfg.Yourself and self.Key == LocalPlayer then
+	if not cfg.Yourself and isLocalCharacter(model) then
 		self:SetVisible(false)
 		return
 	end
@@ -460,7 +482,7 @@ function ESPGroup.new()
 		InvisibleColor = Color3.fromRGB(255, 0, 0),
 		MaxDistance = 5000,
 		Yourself = false,
-		AdaptWidth = true,
+		AdaptWidth = false,
 	}
 	return self
 end

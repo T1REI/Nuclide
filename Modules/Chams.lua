@@ -14,6 +14,24 @@ local function getRaycastParams()
 	return RaycastCache
 end
 
+local function isLocalCharacter(model)
+	if not model then return false end
+	if LocalPlayer and model == LocalPlayer.Character then
+		return true
+	end
+	local username = LocalPlayer and LocalPlayer.Name
+	if username then
+		if model.Name == username then
+			return true
+		end
+		local attr = model:GetAttribute("Username")
+		if attr and tostring(attr) == username then
+			return true
+		end
+	end
+	return false
+end
+
 local ChamsInstance = {}
 ChamsInstance.__index = ChamsInstance
 
@@ -72,6 +90,11 @@ function ChamsInstance:Update(camera)
 	local cfg = self.Group.Config
 	local model = self.Model
 	if not model or model.Parent == nil then
+		self:SetVisible(false)
+		return
+	end
+
+	if not cfg.Yourself and isLocalCharacter(model) then
 		self:SetVisible(false)
 		return
 	end
@@ -147,6 +170,7 @@ function ChamsGroup.new()
 		FillTransparency = 0.5,
 		OutlineTransparency = 0,
 		MaxDistance = 5000,
+		Yourself = false,
 	}
 	return self
 end
