@@ -1,8 +1,8 @@
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
-local ESPClass = loadstring(game:HttpGet("https://raw.githubusercontent.com/T1REI/Nuclide/refs/heads/main/Modules/ESP.lua"))()
-local ChamsClass = loadstring(game:HttpGet("https://raw.githubusercontent.com/T1REI/Nuclide/refs/heads/main/Modules/Chams.lua"))()
+local ESPClass = loadstring(game:HttpGet("https://raw.githubusercontent.com/T1REI/Nuclide/refs/heads/main/Modules/ESP.lua?t=" .. os.time()))()
+local ChamsClass = loadstring(game:HttpGet("https://raw.githubusercontent.com/T1REI/Nuclide/refs/heads/main/Modules/Chams.lua?t=" .. os.time()))()
 
 local espInstance = ESPClass.new()
 espInstance:Start()
