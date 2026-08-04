@@ -407,10 +407,9 @@ local autoGenToggle = TasksTab:CreateToggle({
 })
 
 TasksTab:CreateSlider({
-	name = "Delay per stage tick (ms)",
+	name = "Delay per stage tick",
 	flag = "AutoGenDelay",
-	min = 1,
-	max = 1000,
+	range = {1, 1000},
 	increment = 1,
 	suffix = "ms",
 	value = 100,
@@ -429,32 +428,84 @@ TasksTab:CreateButton({
 
 TasksTab:CreateSection("Statistics")
 
-local stagesLabel = TasksTab:CreateLabel("Stages completed: 0")
-local clicksLabel = TasksTab:CreateLabel("Clicks sent: 0")
-local progressLabel = TasksTab:CreateLabel("Current progress: -")
-local stageLabel = TasksTab:CreateLabel("Current stage: -")
-local clicksNextLabel = TasksTab:CreateLabel("Clicks until next stage: -")
-local clicksDoneLabel = TasksTab:CreateLabel("Clicks until done: -")
-local insideLabel = TasksTab:CreateLabel("Inside generator: No")
+local statRow = TasksTab:CreateGroup()
+local col1 = statRow:CreateGroup({ direction = "column" })
+local col2 = statRow:CreateGroup({ direction = "column" })
+
+local stagesStat = col1:CreateStat({
+	name = "Stages completed",
+	value = 0,
+	compact = true,
+})
+
+local clicksStat = col2:CreateStat({
+	name = "Clicks sent",
+	value = 0,
+	compact = true,
+})
+
+local progressStat = col1:CreateStat({
+	name = "Current progress",
+	value = 0,
+	suffix = "%",
+	compact = true,
+})
+
+local stageStat = col2:CreateStat({
+	name = "Current stage",
+	value = 0,
+	suffix = "/4",
+	compact = true,
+})
+
+local clicksNextStat = col1:CreateStat({
+	name = "Clicks to next stage",
+	value = 0,
+	compact = true,
+})
+
+local clicksDoneStat = col2:CreateStat({
+	name = "Clicks to complete",
+	value = 0,
+	compact = true,
+})
+
+local statusStat = TasksTab:CreateButton({
+	name = "Status: Idle",
+	callback = function() end,
+})
+
+local function setStatus(text)
+	pcall(function() statusStat:Set({ name = "Status: " .. text }) end)
+end
 
 task.spawn(function()
 	while true do
 		task.wait(0.25)
+		if not autoGen then break end
 		local stats = autoGen:GetStats()
-		stagesLabel:Set("Stages completed: " .. tostring(stats.stagesCompleted))
-		clicksLabel:Set("Clicks sent: " .. tostring(stats.clicksSent))
+		stagesStat:Set(stats.stagesCompleted)
+		clicksStat:Set(stats.clicksSent)
 		if stats.currentGenerator and stats.progress then
-			progressLabel:Set(string.format("Current progress: %d%%", stats.progress))
-			stageLabel:Set("Current stage: " .. tostring(stats.stage) .. "/4")
-			clicksNextLabel:Set("Clicks until next stage: " .. tostring(stats.clicksUntilNextStage))
-			clicksDoneLabel:Set("Clicks until done: " .. tostring(stats.clicksUntilDone))
-			insideLabel:Set("Inside generator: " .. (stats.insideGenerator and "Yes" or "Approaching"))
+			progressStat:Set(stats.progress)
+			stageStat:Set(stats.stage)
+			clicksNextStat:Set(stats.clicksUntilNextStage)
+			clicksDoneStat:Set(stats.clicksUntilDone)
+			if stats.insideGenerator then
+				setStatus("Repairing...")
+			else
+				setStatus("Approaching...")
+			end
 		else
-			progressLabel:Set("Current progress: -")
-			stageLabel:Set("Current stage: -")
-			clicksNextLabel:Set("Clicks until next stage: -")
-			clicksDoneLabel:Set("Clicks until done: -")
-			insideLabel:Set("Inside generator: No")
+			progressStat:Set(0)
+			stageStat:Set(0)
+			clicksNextStat:Set(0)
+			clicksDoneStat:Set(0)
+			if stats.enabled then
+				setStatus("Searching...")
+			else
+				setStatus("Idle")
+			end
 		end
 	end
 end)

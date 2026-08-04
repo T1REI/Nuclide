@@ -22,6 +22,7 @@ The repository is organized into highly optimized, object-oriented modules:
 | :--- | :--- |
 | 📦 **Modules/ESP.lua** | High-performance 2D drawing engine (Boxes, Nametags, Health, Distance) |
 | 📦 **Modules/Chams.lua** | Advanced `Highlight`-based ESP with visible/occluded checks |
+| 📦 **Modules/AutoGenerator.lua** | Auto-repair for Forsaken generators with distance-based enter/repair logic |
 | 🎮 **forsaken/forsaken.lua** | Custom game script for **The Forsaken** using Rayfield UI |
 
 ---
