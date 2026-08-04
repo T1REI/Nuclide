@@ -30,6 +30,9 @@ local DEFAULT_CONFIG = {
 	MeasureInterval = 1,
 	HealthBarWidth = 4,
 	TextSize = 13,
+	NametagSize = 13,
+	NametagColor = nil,
+	NametagFormatter = nil,
 }
 
 local RaycastCache = nil
@@ -460,6 +463,7 @@ function Target:Update(camera)
 				line.Color = dark:Lerp(light, t)
 				line.Thickness = barW
 				line.Transparency = trans
+				line.Visible = true
 			end
 		end
 	else
@@ -478,13 +482,27 @@ function Target:Update(camera)
 	end
 
 	if cfg.Nametag then
-		local name = self.Player and self.Player.DisplayName or model.Name
+		local baseName = self.Player and self.Player.DisplayName or model.Name
+		local custom = self.Manager.CustomNametags[self.Key] or self.Manager.CustomNametags[self.Player] or self.Manager.CustomNametags[model]
+		local name
+		if custom ~= nil then
+			name = tostring(custom)
+		elseif cfg.NametagFormatter and type(cfg.NametagFormatter) == "function" then
+			local ok, result = pcall(cfg.NametagFormatter, self.Player, model, dist, self.Humanoid and self.Humanoid.Health, self.Humanoid and self.Humanoid.MaxHealth, baseName)
+			if ok and result ~= nil then
+				name = tostring(result)
+			else
+				name = baseName
+			end
+		else
+			name = baseName
+		end
 		self.NameTag.Text = name
 		local b = self.NameTag.TextBounds
 		self.NameTag.Position = Vector2.new((minX + maxX) * 0.5 - b.X * 0.5, minY - b.Y - 3)
-		self.NameTag.Color = chosen
+		self.NameTag.Color = cfg.NametagColor or chosen
 		self.NameTag.Transparency = trans
-		self.NameTag.Size = cfg.TextSize
+		self.NameTag.Size = cfg.NametagSize or cfg.TextSize
 	end
 
 	if cfg.Distance then
@@ -528,7 +546,7 @@ function Target:_syncVisible()
 		for i = 1, 8 do
 			self.Lines[i].Color = self.CurrentColor
 		end
-		self.NameTag.Color = self.CurrentColor
+		self.NameTag.Color = cfg.NametagColor or self.CurrentColor
 		self.DistanceTag.Color = self.CurrentColor
 		self.HealthText.Color = self.CurrentColor
 	end
@@ -554,9 +572,9 @@ function Target:ApplyConfig()
 	self.HealthText.Size = cfg.TextSize
 	self.HealthText.Transparency = trans
 	self.HealthText.Color = self.CurrentColor
-	self.NameTag.Size = cfg.TextSize
+	self.NameTag.Size = cfg.NametagSize or cfg.TextSize
 	self.NameTag.Transparency = trans
-	self.NameTag.Color = self.CurrentColor
+	self.NameTag.Color = cfg.NametagColor or self.CurrentColor
 	self.DistanceTag.Size = math.max(cfg.TextSize - 1, 11)
 	self.DistanceTag.Transparency = trans
 	self.DistanceTag.Color = self.CurrentColor
@@ -596,6 +614,7 @@ function NuclideESP.new()
 		self.Config[k] = v
 	end
 	self.Targets = {}
+	self.CustomNametags = {}
 	self.Running = false
 	self.PlayersBound = false
 	self.Connection = nil
@@ -747,9 +766,30 @@ function NuclideESP:SetConfig(over)
 	c.MeasureInterval = math.max(c.MeasureInterval, 0.2)
 	c.HealthBarWidth = math.clamp(c.HealthBarWidth, 1, 10)
 	c.TextSize = math.clamp(c.TextSize, 8, 24)
+	c.NametagSize = math.clamp(c.NametagSize or c.TextSize, 8, 32)
 	for _, t in pairs(self.Targets) do
 		t:ApplyConfig()
 	end
+	return self
+end
+
+function NuclideESP:SetNametag(targetKey, text)
+	self.CustomNametags[targetKey] = text
+	return self
+end
+
+function NuclideESP:ClearNametag(targetKey)
+	self.CustomNametags[targetKey] = nil
+	return self
+end
+
+function NuclideESP:SetNametagFormatter(formatter)
+	self.Config.NametagFormatter = formatter
+	return self
+end
+
+function NuclideESP:ClearAllNametags()
+	table.clear(self.CustomNametags)
 	return self
 end
 
