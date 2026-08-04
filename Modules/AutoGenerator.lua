@@ -4,22 +4,9 @@ local RunService = game:GetService("RunService")
 
 local STAGE_COMPLETE = 100
 local STAGE_THRESHOLDS = {26, 52, 78, 100}
-local INTERACT_DISTANCE = 8
-local ENTER_RETRY_MS = 600
 local FIRE_COOLDOWN_MS = 120
-local SCAN_INTERVAL = 0.15
 local MAP_REFRESH_INTERVAL = 1.0
-
-local ERROR_MESSAGES = {
-	tooFar = "Too far from generator",
-	positionOccupied = "Position is occupied, retrying...",
-	tooMany = "Too many players on generator",
-	alreadyFixed = "Generator already fixed",
-	dead = "Player is dead",
-	isKiller = "Cannot repair as killer",
-	isUnknownTeam = "Spectator cannot repair",
-	leftAlready = "Already left",
-}
+local PLAYER_UI_CHECK_INTERVAL = 0.2
 
 local AutoGenerator = {}
 AutoGenerator.__index = AutoGenerator
@@ -31,18 +18,20 @@ function AutoGenerator.new()
 	self.DelayMs = 100
 	self.StagesCompleted = 0
 	self.GeneratorsCompleted = 0
-	self.LastError = "Idle"
+	self.Status = "Idle - enter a generator manually"
 
 	self._mapFolder = nil
 	self._currentGenerator = nil
 	self._insideGenerator = false
-	self._lastEnter = 0
 	self._lastFire = 0
 	self._connections = {}
+	self._hookConnections = {}
+	self._originalNamecall = nil
+	self._namecallHooked = false
 	self._running = false
-	self._nextScan = 0
+	self._nextUiCheck = 0
 	self._nextMapRefresh = 0
-	self._stageAtEnter = 0
+	self._lastProgress = 0
 
 	return self
 end
@@ -58,17 +47,15 @@ end
 
 function AutoGenerator:Diagnostics()
 	local folder = self:_getMapFolder()
-	local generators = folder and self:_findGenerators(folder) or {}
-	local gen = self._currentGenerator
-	local rf, re = gen and self:_getGeneratorRemotes(gen)
+	local gens = folder and self:_findGenerators(folder) or {}
+	local progress = self._currentGenerator and self:_getProgressValue(self._currentGenerator)
 	return {
 		mapLoaded = folder ~= nil,
-		generatorCount = #generators,
-		hasTarget = gen ~= nil,
-		rfFound = rf ~= nil,
-		reFound = re ~= nil,
+		generatorCount = #gens,
 		inside = self._insideGenerator,
-		lastError = self.LastError,
+		hasTarget = self._currentGenerator ~= nil,
+		progress = progress,
+		status = self.Status,
 		enabled = self.Enabled,
 	}
 end
@@ -83,6 +70,7 @@ end
 function AutoGenerator:Start()
 	if self._running then return end
 	self._running = true
+	self:_installHooks()
 
 	local conn = RunService.Heartbeat:Connect(function(dt)
 		if not self.Enabled then return end
@@ -94,6 +82,7 @@ end
 function AutoGenerator:Stop()
 	self.Enabled = false
 	self._running = false
+	self:_cleanupHooks()
 	for _, c in ipairs(self._connections) do
 		c:Disconnect()
 	end
@@ -101,7 +90,7 @@ function AutoGenerator:Stop()
 	self._mapFolder = nil
 	self._currentGenerator = nil
 	self._insideGenerator = false
-	self.LastError = "Idle"
+	self.Status = "Idle"
 end
 
 function AutoGenerator:SetEnabled(value)
@@ -109,8 +98,131 @@ function AutoGenerator:SetEnabled(value)
 	if not self.Enabled then
 		self._currentGenerator = nil
 		self._insideGenerator = false
-		self.LastError = "Idle"
+		self.Status = "Idle - enter a generator manually"
 	end
+end
+
+function AutoGenerator:_cleanupHooks()
+	for _, c in ipairs(self._hookConnections) do
+		c:Disconnect()
+	end
+	table.clear(self._hookConnections)
+	if self._originalNamecall then
+		pcall(hookmetamethod, game, "__namecall", self._originalNamecall)
+		self._originalNamecall = nil
+		self._namecallHooked = false
+	end
+end
+
+function AutoGenerator:_installHooks()
+	self:_cleanupHooks()
+
+	if not self._namecallHooked then
+		local oldNamecall = getmetatable(game).__namecall
+		local newNamecall = function(...)
+			local selfRef = select(1, ...)
+			local method = getnamecallmethod()
+			if method == "InvokeServer"
+				and type(selfRef) == "userdata"
+				and pcall(game.IsA, selfRef, "RemoteFunction")
+			then
+				local parent = selfRef.Parent
+				if parent and parent.Name == "Remotes" then
+					local gen = parent.Parent
+					if gen and gen:IsA("Model") then
+						local msg = select(2, ...)
+						if msg == "Enter" then
+							local results = table.pack(oldNamecall(...))
+							local status = results[1]
+							if status == "fixing" then
+								self:_onEnteredGenerator(gen)
+							elseif status == "leftAlready" then
+								self:_onLeftGenerator(gen)
+							end
+							return table.unpack(results, 1, results.n)
+						elseif msg == "Leave" then
+							self:_onLeftGenerator(gen)
+						end
+					end
+				end
+			end
+			return oldNamecall(...)
+		end
+		hookmetamethod(game, "__namecall", newNamecall)
+		self._originalNamecall = oldNamecall
+		self._namecallHooked = true
+	end
+
+	local player = Players.LocalPlayer
+	if player then
+		task.spawn(function()
+			while self._running do
+				task.wait(PLAYER_UI_CHECK_INTERVAL)
+				if not self._running then break end
+				self:_checkGeneratorUi(player)
+			end
+		end)
+	end
+end
+
+function AutoGenerator:_checkGeneratorUi(player)
+	local tempGui = player:FindFirstChild("PlayerGui")
+		and player.PlayerGui:FindFirstChild("TemporaryUI")
+	if not tempGui then return end
+	local hasGenUi = false
+	for _, child in ipairs(tempGui:GetChildren()) do
+		if child.Name == "GeneratorFixUi" or child:FindFirstChild("BarHolder", true) then
+			hasGenUi = true
+			break
+		end
+	end
+	if hasGenUi and not self._insideGenerator then
+		self:_onEnteredGenerator(self:_guessCurrentGenerator())
+	elseif not hasGenUi and self._insideGenerator then
+		self:_onLeftGenerator(self._currentGenerator)
+	end
+end
+
+function AutoGenerator:_guessCurrentGenerator()
+	local folder = self:_getMapFolder()
+	if not folder then return self._currentGenerator end
+	local char = self:_getLocalCharacter()
+	local root = self:_getRootPart(char)
+	local best, bestDist = nil, 12
+	for _, gen in ipairs(self:_findGenerators(folder)) do
+		local rf, re = self:_getGeneratorRemotes(gen)
+		if rf and re then
+			local p = self:_getProgressValue(gen)
+			if p and p < STAGE_COMPLETE then
+				local part = gen.PrimaryPart
+				if part and root then
+					local d = (part.Position - root.Position).Magnitude
+					if d < bestDist then
+						best = gen
+						bestDist = d
+					end
+				end
+			end
+		end
+	end
+	return best or self._currentGenerator
+end
+
+function AutoGenerator:_onEnteredGenerator(generator)
+	if not generator then return end
+	self._insideGenerator = true
+	self._currentGenerator = generator
+	self._lastProgress = self:_getProgressValue(generator) or 0
+	self._lastFire = tick() * 1000 + 500
+	self.Status = "Repairing (auto-click)"
+end
+
+function AutoGenerator:_onLeftGenerator(generator)
+	if self._currentGenerator and generator and self._currentGenerator ~= generator then return end
+	self._insideGenerator = false
+	self._currentGenerator = nil
+	self._lastProgress = 0
+	self.Status = self.Enabled and "Idle - enter a generator manually" or "Idle"
 end
 
 function AutoGenerator:_getMapFolder()
@@ -124,8 +236,10 @@ end
 function AutoGenerator:_findGenerators(mapFolder)
 	local result = {}
 	for _, child in ipairs(mapFolder:GetChildren()) do
-		if child.Name == "Generator" or child:FindFirstChild("Remotes") then
-			if child:IsA("Model") then
+		if child:IsA("Model") then
+			local remotes = child:FindFirstChild("Remotes")
+			local hasProgress = child:FindFirstChild("Progress")
+			if remotes and hasProgress then
 				table.insert(result, child)
 			end
 		end
@@ -139,12 +253,8 @@ function AutoGenerator:_getGeneratorRemotes(generator)
 	if not remotes then return nil, nil end
 	local rf = remotes:FindFirstChild("RF")
 	local re = remotes:FindFirstChild("RE")
-	if not rf then
-		rf = remotes:FindFirstChildOfClass("RemoteFunction")
-	end
-	if not re then
-		re = remotes:FindFirstChildOfClass("RemoteEvent")
-	end
+	if not rf then rf = remotes:FindFirstChildOfClass("RemoteFunction") end
+	if not re then re = remotes:FindFirstChildOfClass("RemoteEvent") end
 	return rf, re
 end
 
@@ -161,49 +271,9 @@ function AutoGenerator:_getRootPart(character)
 		or character:FindFirstChild("UpperTorso")
 end
 
-function AutoGenerator:_getNearestGenerator()
-	local folder = self:_getMapFolder()
-	if not folder then return nil, math.huge end
-	local character = self:_getLocalCharacter()
-	local root = self:_getRootPart(character)
-	if not root then return nil, math.huge end
-
-	local best, bestDist = nil, INTERACT_DISTANCE
-	for _, gen in ipairs(self:_findGenerators(folder)) do
-		local rf, re = self:_getGeneratorRemotes(gen)
-		if rf and re then
-			local progress = self:_getProgressValue(gen)
-			if progress and progress < STAGE_COMPLETE then
-				local part = gen.PrimaryPart
-				if not part then
-					for _, d in ipairs(gen:GetDescendants()) do
-						if d:IsA("BasePart") then part = d; break end
-					end
-				end
-				if part then
-					local dist = (part.Position - root.Position).Magnitude
-					if dist < bestDist then
-						best = gen
-						bestDist = dist
-					end
-				end
-			end
-		end
-	end
-	return best, bestDist
-end
-
 function AutoGenerator:_getProgressValue(generator)
 	if not generator then return nil end
 	local progress = generator:FindFirstChild("Progress")
-	if not progress then
-		for _, d in ipairs(generator:GetDescendants()) do
-			if d.Name == "Progress" and d:IsA("NumberValue") then
-				progress = d
-				break
-			end
-		end
-	end
 	if not progress then return nil end
 	if progress:IsA("NumberValue") then return progress.Value end
 	local val = progress:FindFirstChild("Value")
@@ -222,50 +292,6 @@ function AutoGenerator:_countStages(progress)
 	return count
 end
 
-function AutoGenerator:_tryEnter(generator)
-	local rf, re = self:_getGeneratorRemotes(generator)
-	if not rf then
-		self.LastError = "RF not found"
-		return false
-	end
-	local now = tick() * 1000
-	if self._insideGenerator and self._currentGenerator == generator then
-		if now - self._lastEnter < ENTER_RETRY_MS then return true end
-	end
-	if now - self._lastEnter < 250 then return self._insideGenerator end
-
-	local ok, status, part, numVal = pcall(function()
-		return rf:InvokeServer("Enter")
-	end)
-
-	if not ok then
-		self.LastError = "Invoke error: " .. tostring(status)
-		self._insideGenerator = false
-		return false
-	end
-
-	if status == "fixing" then
-		self._insideGenerator = true
-		self._currentGenerator = generator
-		self._lastEnter = now
-		self._stageAtEnter = self:_countStages(self:_getProgressValue(generator) or 0)
-		self.LastError = "Repairing"
-		self._lastFire = now + 400
-		return true
-	end
-
-	self._insideGenerator = false
-	if status == nil then
-		self.LastError = "No response from server"
-	elseif type(status) == "string" then
-		self.LastError = ERROR_MESSAGES[status] or ("Server: " .. status)
-	else
-		self.LastError = "Unexpected response: " .. tostring(status)
-	end
-	self._lastEnter = now
-	return false
-end
-
 function AutoGenerator:_sendRepair()
 	local gen = self._currentGenerator
 	if not gen then
@@ -274,20 +300,18 @@ function AutoGenerator:_sendRepair()
 	end
 	local rf, re = self:_getGeneratorRemotes(gen)
 	if not re then
-		self.LastError = "RE not found"
+		self.Status = "RE not found in generator"
 		return false
 	end
 
 	local beforeProgress = self:_getProgressValue(gen) or 0
 	local stagesBefore = self:_countStages(beforeProgress)
 
-	local ok, err = pcall(function()
+	local ok = pcall(function()
 		re:FireServer()
 	end)
-
 	if not ok then
-		self.LastError = "Fire error: " .. tostring(err)
-		self._insideGenerator = false
+		self.Status = "Failed to fire repair event"
 		return false
 	end
 
@@ -298,16 +322,18 @@ function AutoGenerator:_sendRepair()
 	if stagesAfter > stagesBefore then
 		self.StagesCompleted = self.StagesCompleted + (stagesAfter - stagesBefore)
 	end
+	self._lastProgress = afterProgress
 
 	if afterProgress >= STAGE_COMPLETE then
 		self.GeneratorsCompleted = self.GeneratorsCompleted + 1
 		self._insideGenerator = false
 		self._currentGenerator = nil
-		self.LastError = "Generator complete"
-		self._stageAtEnter = 0
+		self._lastProgress = 0
+		self.Status = "Generator completed - waiting for next"
 		return true, true
 	end
 
+	self.Status = string.format("Repairing (auto-click) - %d%%", afterProgress)
 	return true, false
 end
 
@@ -318,38 +344,32 @@ function AutoGenerator:_tick(dt)
 		self._mapFolder = self:_getMapFolder()
 	end
 
-	self._nextScan = self._nextScan - dt
-	if self._nextScan > 0 then return end
-	self._nextScan = SCAN_INTERVAL
-
-	local nearest, dist = self:_getNearestGenerator()
-	if not nearest then
-		if self._insideGenerator then
-			self._insideGenerator = false
+	if not self._insideGenerator then
+		if self.Enabled then
+			self.Status = "Idle - enter a generator manually"
 		end
-		self._currentGenerator = nil
-		self.LastError = self.Enabled and "Looking for generator..." or "Idle"
 		return
 	end
 
-	if self._currentGenerator ~= nearest then
-		self._currentGenerator = nearest
+	if not self._currentGenerator then
 		self._insideGenerator = false
+		return
 	end
 
-	local entered = self:_tryEnter(nearest)
-	if not entered then return end
+	local progress = self:_getProgressValue(self._currentGenerator)
+	if progress == nil then return end
+	if progress >= STAGE_COMPLETE then
+		self.GeneratorsCompleted = self.GeneratorsCompleted + 1
+		self._insideGenerator = false
+		self._currentGenerator = nil
+		self._lastProgress = 0
+		self.Status = "Generator completed - waiting for next"
+		return
+	end
 
 	local now = tick() * 1000
 	local effectiveDelay = math.max(self.DelayMs, FIRE_COOLDOWN_MS)
 	if now - self._lastFire < effectiveDelay then return end
-
-	local progress = self:_getProgressValue(self._currentGenerator)
-	if progress == nil or progress >= STAGE_COMPLETE then
-		self._insideGenerator = false
-		self._currentGenerator = nil
-		return
-	end
 
 	local clicked, done = self:_sendRepair()
 	if clicked then

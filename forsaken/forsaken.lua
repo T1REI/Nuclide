@@ -401,11 +401,9 @@ TasksTab:CreateToggle({
 		if Value then
 			local diag = autoGen:Diagnostics()
 			local msg = string.format(
-				"Map: %s | Generators: %d | Target: %s\nStatus: %s",
+				"Map: %s | Generators: %d\nEnter a generator manually to start auto-repair.",
 				diag.mapLoaded and "OK" or "NOT LOADED",
-				diag.generatorCount,
-				diag.hasTarget and "found" or "none",
-				diag.lastError
+				diag.generatorCount
 			)
 			Window:Notify({ title = "Auto Generator", content = msg, duration = 5 })
 		end
@@ -436,14 +434,13 @@ TasksTab:CreateButton({
 	callback = function()
 		local diag = autoGen:Diagnostics()
 		local msg = string.format(
-			"Map: %s\nGenerators on map: %d\nTarget found: %s\nGenerator remotes (RF/RE): %s / %s\nInside repairing state: %s\nLast status: %s",
+			"Map: %s\nGenerators on map: %d\nInside generator (manual): %s\nActive repair target: %s\nCurrent progress: %s%%\nStatus: %s",
 			diag.mapLoaded and "Loaded" or "Not loaded",
 			diag.generatorCount,
-			diag.hasTarget and "Yes" or "No",
-			diag.rfFound and "OK" or "NOT FOUND",
-			diag.reFound and "OK" or "NOT FOUND",
 			diag.inside and "Yes" or "No",
-			diag.lastError
+			diag.hasTarget and "Yes" or "No",
+			diag.progress ~= nil and tostring(diag.progress) or "-",
+			diag.status
 		)
 		Window:Notify({ title = "Diagnostics", content = msg, duration = 8 })
 	end,
