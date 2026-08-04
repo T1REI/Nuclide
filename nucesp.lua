@@ -11,15 +11,45 @@ local CORNER_OFFSETS = {
 
 local DEFAULT_CONFIG = {
 	Enabled = false,
-	Color = Color3.fromRGB(255, 255, 255),
 	Corner = true,
+	Yourself = false,
+	DeadCheck = true,
+	TeamCheck = false,
+	VisibleColor = Color3.fromRGB(255, 255, 255),
+	InvisibleColor = Color3.fromRGB(255, 80, 80),
 	Thickness = 2,
 	Transparency = 0,
+	HealthBar = true,
+	HealthText = true,
+	Nametag = true,
+	Distance = true,
 	MaxDistance = 5000,
-	TeamCheck = false,
 	CornerLengthFraction = 0.2,
 	MeasureInterval = 1,
+	HealthBarWidth = 4,
+	TextSize = 13,
 }
+
+local RaycastParamsCache = nil
+local function getRaycastParams()
+	if not RaycastParamsCache then
+		RaycastParamsCache = RaycastParams.new()
+		RaycastParamsCache.FilterType = Enum.RaycastFilterType.Exclude
+		RaycastParamsCache.IgnoreWater = true
+	end
+	return RaycastParamsCache
+end
+
+local function isAccessoryDescendant(part, model)
+	local cur = part.Parent
+	while cur and cur ~= model do
+		if cur:IsA("Accessory") then
+			return true
+		end
+		cur = cur.Parent
+	end
+	return false
+end
 
 local Target = {}
 Target.__index = Target
@@ -31,8 +61,9 @@ function Target.new(manager, key, isPlayer)
 	self.Player = isPlayer and key or nil
 	self.Model = nil
 	self.RootPart = nil
+	self.Humanoid = nil
 	self.CachedCFrame = nil
-	self.Size = nil
+	self.Size = Vector3.new(2, 5, 1)
 	self.SizeVersion = 0
 	self.MeasuredAt = 0
 	self.Visible = false
@@ -40,29 +71,71 @@ function Target.new(manager, key, isPlayer)
 	self.LastCenter = nil
 	self.LastRot = nil
 	self.LastSizeVersion = 0
+	self.LastVisCheck = 0
+	self.IsRayVisible = true
+	self.CurrentColor = manager.Config.VisibleColor
 	self.Lines = {}
 	self.Connections = {}
 	if Drawing then
-		local config = manager.Config
+		local cfg = manager.Config
+		local trans = 1 - cfg.Transparency
 		for i = 1, 8 do
-			local line = Drawing.new("Line")
-			line.Color = config.Color
-			line.Thickness = config.Thickness
-			line.Transparency = 1 - config.Transparency
-			line.Visible = false
-			self.Lines[i] = line
+			local l = Drawing.new("Line")
+			l.Color = cfg.VisibleColor
+			l.Thickness = cfg.Thickness
+			l.Transparency = trans
+			l.Visible = false
+			self.Lines[i] = l
 		end
+		self.HealthBg = Drawing.new("Line")
+		self.HealthBg.Color = Color3.fromRGB(0, 0, 0)
+		self.HealthBg.Thickness = cfg.HealthBarWidth + 2
+		self.HealthBg.Transparency = trans
+		self.HealthBg.Visible = false
+
+		self.HealthFill = Drawing.new("Line")
+		self.HealthFill.Thickness = cfg.HealthBarWidth
+		self.HealthFill.Transparency = trans
+		self.HealthFill.Color = Color3.fromRGB(0, 255, 0)
+		self.HealthFill.Visible = false
+
+		self.HealthText = Drawing.new("Text")
+		self.HealthText.Size = cfg.TextSize
+		self.HealthText.Color = Color3.fromRGB(255, 255, 255)
+		self.HealthText.Outline = true
+		self.HealthText.OutlineColor = Color3.fromRGB(0, 0, 0)
+		self.HealthText.Transparency = trans
+		self.HealthText.Visible = false
+		self.HealthText.Center = false
+
+		self.NameTag = Drawing.new("Text")
+		self.NameTag.Size = cfg.TextSize
+		self.NameTag.Color = cfg.VisibleColor
+		self.NameTag.Outline = true
+		self.NameTag.OutlineColor = Color3.fromRGB(0, 0, 0)
+		self.NameTag.Transparency = trans
+		self.NameTag.Visible = false
+		self.NameTag.Center = false
+
+		self.DistanceTag = Drawing.new("Text")
+		self.DistanceTag.Size = math.max(cfg.TextSize - 1, 11)
+		self.DistanceTag.Color = Color3.fromRGB(200, 200, 200)
+		self.DistanceTag.Outline = true
+		self.DistanceTag.OutlineColor = Color3.fromRGB(0, 0, 0)
+		self.DistanceTag.Transparency = trans
+		self.DistanceTag.Visible = false
+		self.DistanceTag.Center = false
 	end
 	if self.Player then
-		local player = self.Player
-		table.insert(self.Connections, player.CharacterAdded:Connect(function(character)
-			self:BindCharacter(character)
+		local pl = self.Player
+		table.insert(self.Connections, pl.CharacterAdded:Connect(function(ch)
+			self:BindCharacter(ch)
 		end))
-		table.insert(self.Connections, player.CharacterRemoving:Connect(function()
+		table.insert(self.Connections, pl.CharacterRemoving:Connect(function()
 			self:Unbind()
 		end))
-		if player.Character then
-			task.spawn(self.BindCharacter, self, player.Character)
+		if pl.Character then
+			task.spawn(self.BindCharacter, self, pl.Character)
 		end
 	else
 		self:BindModel(key)
@@ -72,13 +145,19 @@ end
 
 function Target:BindCharacter(character)
 	self.Model = character
-	local rootPart = character:WaitForChild("HumanoidRootPart", 15)
-	character:WaitForChild("Humanoid", 15)
-	if character == self.Model then
-		self.RootPart = rootPart
-		task.wait()
-		self:_measure()
+	local hrp = character:WaitForChild("HumanoidRootPart", 10)
+	local hum = character:FindFirstChildOfClass("Humanoid")
+	if not hum then
+		character:WaitForChild("Humanoid", 10)
+		hum = character:FindFirstChildOfClass("Humanoid")
 	end
+	if character ~= self.Model then
+		return
+	end
+	self.RootPart = hrp
+	self.Humanoid = hum
+	task.wait()
+	self:_measure()
 end
 
 function Target:BindModel(model)
@@ -86,12 +165,14 @@ function Target:BindModel(model)
 	self.RootPart = model.PrimaryPart
 		or model:FindFirstChild("HumanoidRootPart")
 		or model:FindFirstChildOfClass("BasePart")
+	self.Humanoid = model:FindFirstChildOfClass("Humanoid")
 	self:_measure()
 end
 
 function Target:Unbind()
 	self.Model = nil
 	self.RootPart = nil
+	self.Humanoid = nil
 	self.CachedCFrame = nil
 	self:SetVisible(false)
 end
@@ -101,65 +182,101 @@ function Target:_measure()
 	if not model then
 		return
 	end
-	local refCF
-	if self.RootPart then
-		refCF = self.RootPart.CFrame
-	else
+	local ref = self.RootPart and self.RootPart.CFrame
+	if not ref then
 		local ok, cf = pcall(model.GetBoundingBox, model)
 		if ok and cf then
-			refCF = cf
+			ref = cf
 			self.CachedCFrame = cf
 		end
 	end
-	if not refCF then
+	if not ref then
 		return
 	end
-	local inv = refCF:Inverse()
+	local inv = ref:Inverse()
 	local minX, minY, minZ = math.huge, math.huge, math.huge
 	local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
 	local found = false
-	for _, part in ipairs(model:GetDescendants()) do
-		if part:IsA("BasePart") then
-			local sx, sy, sz = part.Size.X * 0.5, part.Size.Y * 0.5, part.Size.Z * 0.5
-			local pcf = part.CFrame
-			for dx = -1, 1, 2 do
-				for dy = -1, 1, 2 do
-					for dz = -1, 1, 2 do
-						local corner = inv * (pcf * Vector3.new(sx * dx, sy * dy, sz * dz))
-						local x, y, z = corner.X, corner.Y, corner.Z
-						if x < minX then minX = x end
-						if x > maxX then maxX = x end
-						if y < minY then minY = y end
-						if y > maxY then maxY = y end
-						if z < minZ then minZ = z end
-						if z > maxZ then maxZ = z end
+
+	if self.Player then
+		for _, child in ipairs(model:GetChildren()) do
+			if child:IsA("BasePart") then
+				local sx, sy, sz = child.Size.X * 0.5, child.Size.Y * 0.5, child.Size.Z * 0.5
+				local pcf = child.CFrame
+				for dx = -1, 1, 2 do
+					for dy = -1, 1, 2 do
+						for dz = -1, 1, 2 do
+							local world = pcf * Vector3.new(sx * dx, sy * dy, sz * dz)
+							local lp = inv * world
+							if lp.X < minX then minX = lp.X end
+							if lp.X > maxX then maxX = lp.X end
+							if lp.Y < minY then minY = lp.Y end
+							if lp.Y > maxY then maxY = lp.Y end
+							if lp.Z < minZ then minZ = lp.Z end
+							if lp.Z > maxZ then maxZ = lp.Z end
+						end
 					end
 				end
+				found = true
 			end
-			found = true
+		end
+	else
+		for _, part in ipairs(model:GetDescendants()) do
+			if part:IsA("BasePart") then
+				if isAccessoryDescendant(part, model) then
+					continue
+				end
+				local sx, sy, sz = part.Size.X * 0.5, part.Size.Y * 0.5, part.Size.Z * 0.5
+				local pcf = part.CFrame
+				for dx = -1, 1, 2 do
+					for dy = -1, 1, 2 do
+						for dz = -1, 1, 2 do
+							local world = pcf * Vector3.new(sx * dx, sy * dy, sz * dz)
+							local lp = inv * world
+							if lp.X < minX then minX = lp.X end
+							if lp.X > maxX then maxX = lp.X end
+							if lp.Y < minY then minY = lp.Y end
+							if lp.Y > maxY then maxY = lp.Y end
+							if lp.Z < minZ then minZ = lp.Z end
+							if lp.Z > maxZ then maxZ = lp.Z end
+						end
+					end
+				end
+				found = true
+			end
 		end
 	end
+
 	if not found then
 		return
 	end
-	local size = Vector3.new(maxX - minX, maxY - minY, maxZ - minZ)
-	if size.Magnitude <= 0.01 then
+
+	local sx = maxX - minX
+	local sy = maxY - minY
+	local sz = maxZ - minZ
+	if sx < 0.01 or sy < 0.01 or sz < 0.01 then
 		return
 	end
-	if not self.Size or (size - self.Size).Magnitude > 0.1 then
+
+	local size = Vector3.new(sx, sy, sz)
+	if self.Player then
+		size = Vector3.new(
+			math.clamp(size.X, 2, 4.5),
+			math.clamp(size.Y, 3, 7.5),
+			math.clamp(size.Z, 1, 3.5)
+		)
+	end
+
+	if (size - self.Size).Magnitude > 0.12 then
 		self.Size = size
 		self.SizeVersion = self.SizeVersion + 1
 	end
 end
 
 function Target:Update(camera)
-	local config = self.Manager.Config
+	local cfg = self.Manager.Config
 	local model = self.Model
-	if not model then
-		self:SetVisible(false)
-		return
-	end
-	if model.Parent == nil then
+	if not model or model.Parent == nil then
 		if self.Player then
 			self:Unbind()
 		else
@@ -167,27 +284,42 @@ function Target:Update(camera)
 		end
 		return
 	end
+
+	if self.Player and not cfg.Yourself and self.Player == LocalPlayer then
+		self:SetVisible(false)
+		return
+	end
+
 	local now = os.clock()
 	if now >= self.MeasuredAt then
-		self.MeasuredAt = now + config.MeasureInterval
+		self.MeasuredAt = now + cfg.MeasureInterval
 		self:_measure()
 	end
+
 	local cf = self.RootPart and self.RootPart.CFrame or self.CachedCFrame
 	if not cf or not self.Size then
 		self:SetVisible(false)
 		return
 	end
-	if self.Player and LocalPlayer and config.TeamCheck
-		and self.Player.Team == LocalPlayer.Team then
+
+	if cfg.TeamCheck and self.Player and LocalPlayer and self.Player.Team == LocalPlayer.Team then
 		self:SetVisible(false)
 		return
 	end
+
+	if cfg.DeadCheck and self.Humanoid and self.Humanoid.Health <= 0 then
+		self:SetVisible(false)
+		return
+	end
+
 	local origin = cf.Position
-	local distance = (camera.CFrame.Position - origin).Magnitude
-	if distance > config.MaxDistance then
+	local camPos = camera.CFrame.Position
+	local dist = (camPos - origin).Magnitude
+	if dist > cfg.MaxDistance then
 		self:SetVisible(false)
 		return
 	end
+
 	local center, onScreen = camera:WorldToViewportPoint(origin)
 	if not onScreen or center.Z <= 0 then
 		self:SetVisible(false)
@@ -196,52 +328,51 @@ function Target:Update(camera)
 
 	local camCF = camera.CFrame
 	local rot = cf.Rotation
-	local cameraMoved = self.LastCamera ~= camCF
+	local camMoved = self.LastCamera ~= camCF
 	local rotated = self.LastRot ~= rot
 	local centerMoved = true
 	if self.LastCenter then
 		local dx = center.X - self.LastCenter.X
 		local dy = center.Y - self.LastCenter.Y
-		centerMoved = dx * dx + dy * dy >= 0.25
+		centerMoved = dx * dx + dy * dy >= 0.5
 	end
-	if not cameraMoved and not rotated and not centerMoved
-		and self.LastSizeVersion == self.SizeVersion and self.Visible then
-		return
+	if not camMoved and not rotated and not centerMoved and self.LastSizeVersion == self.SizeVersion and self.Visible then
+	else
+		self.LastCamera = camCF
+		self.LastRot = rot
+		self.LastCenter = center
+		self.LastSizeVersion = self.SizeVersion
 	end
-	self.LastCamera = camCF
-	self.LastRot = rot
-	self.LastCenter = center
-	self.LastSizeVersion = self.SizeVersion
 
-	local viewport = camera.ViewportSize
 	local half = self.Size * 0.5
 	local right = cf.RightVector * half.X
 	local up = cf.UpVector * half.Y
 	local look = cf.LookVector * half.Z
-
 	local minX, minY = math.huge, math.huge
 	local maxX, maxY = -math.huge, -math.huge
 	local behind = false
 
 	for i = 1, 8 do
 		local o = CORNER_OFFSETS[i]
-		local point = camera:WorldToViewportPoint(Vector3.new(
+		local world = Vector3.new(
 			origin.X + right.X * o[1] + up.X * o[2] + look.X * o[3],
 			origin.Y + right.Y * o[1] + up.Y * o[2] + look.Y * o[3],
 			origin.Z + right.Z * o[1] + up.Z * o[2] + look.Z * o[3]
-		))
-		if point.Z <= 0 then
+		)
+		local p = camera:WorldToViewportPoint(world)
+		if p.Z <= 0 then
 			behind = true
 		else
-			if point.X < minX then minX = point.X end
-			if point.X > maxX then maxX = point.X end
-			if point.Y < minY then minY = point.Y end
-			if point.Y > maxY then maxY = point.Y end
+			if p.X < minX then minX = p.X end
+			if p.X > maxX then maxX = p.X end
+			if p.Y < minY then minY = p.Y end
+			if p.Y > maxY then maxY = p.Y end
 		end
 	end
 
+	local vp = camera.ViewportSize
 	if behind then
-		local pps = (viewport.Y * 0.5) / math.tan(math.rad(camera.FieldOfView) * 0.5) / distance
+		local pps = (vp.Y * 0.5) / math.tan(math.rad(camera.FieldOfView) * 0.5) / math.max(dist, 1)
 		minX = center.X - self.Size.X * pps * 0.5
 		maxX = center.X + self.Size.X * pps * 0.5
 		minY = center.Y - self.Size.Y * pps * 0.5
@@ -253,43 +384,96 @@ function Target:Update(camera)
 	minY = math.floor(minY + 0.5)
 	maxY = math.floor(maxY + 0.5)
 
-	if maxX < 0 or minX > viewport.X or maxY < 0 or minY > viewport.Y then
+	if maxX < 0 or minX > vp.X or maxY < 0 or minY > vp.Y then
 		self:SetVisible(false)
 		return
 	end
 
-	if not config.Corner or not Drawing then
-		self:SetVisible(false)
+	if not Drawing then
 		return
 	end
+
+	if now - self.LastVisCheck >= 0.12 then
+		self.LastVisCheck = now
+		local params = getRaycastParams()
+		params.FilterDescendantsInstances = { model, LocalPlayer and LocalPlayer.Character }
+		local dir = origin - camPos
+		local result = Workspace:Raycast(camPos, dir, params)
+		self.IsRayVisible = result == nil
+	end
+
+	local chosen = self.IsRayVisible and cfg.VisibleColor or cfg.InvisibleColor
+	self.CurrentColor = chosen
 
 	local width = maxX - minX
 	local height = maxY - minY
-	local length = math.clamp(math.min(width, height) * config.CornerLengthFraction, 6, 60)
-	local lines = self.Lines
+	local clen = math.clamp(math.min(width, height) * cfg.CornerLengthFraction, 6, 42)
+	local trans = 1 - cfg.Transparency
 
-	lines[1].From = Vector2.new(minX, minY)
-	lines[1].To = Vector2.new(minX + length, minY)
-	lines[2].From = Vector2.new(minX, minY)
-	lines[2].To = Vector2.new(minX, minY + length)
-	lines[3].From = Vector2.new(maxX, minY)
-	lines[3].To = Vector2.new(maxX - length, minY)
-	lines[4].From = Vector2.new(maxX, minY)
-	lines[4].To = Vector2.new(maxX, minY + length)
-	lines[5].From = Vector2.new(maxX, maxY)
-	lines[5].To = Vector2.new(maxX - length, maxY)
-	lines[6].From = Vector2.new(maxX, maxY)
-	lines[6].To = Vector2.new(maxX, maxY - length)
-	lines[7].From = Vector2.new(minX, maxY)
-	lines[7].To = Vector2.new(minX + length, maxY)
-	lines[8].From = Vector2.new(minX, maxY)
-	lines[8].To = Vector2.new(minX, maxY - length)
+	if cfg.Corner then
+		local l = self.Lines
+		l[1].From = Vector2.new(minX, minY); l[1].To = Vector2.new(minX + clen, minY)
+		l[2].From = Vector2.new(minX, minY); l[2].To = Vector2.new(minX, minY + clen)
+		l[3].From = Vector2.new(maxX, minY); l[3].To = Vector2.new(maxX - clen, minY)
+		l[4].From = Vector2.new(maxX, minY); l[4].To = Vector2.new(maxX, minY + clen)
+		l[5].From = Vector2.new(maxX, maxY); l[5].To = Vector2.new(maxX - clen, maxY)
+		l[6].From = Vector2.new(maxX, maxY); l[6].To = Vector2.new(maxX, maxY - clen)
+		l[7].From = Vector2.new(minX, maxY); l[7].To = Vector2.new(minX + clen, maxY)
+		l[8].From = Vector2.new(minX, maxY); l[8].To = Vector2.new(minX, maxY - clen)
+		for i = 1, 8 do
+			l[i].Color = chosen
+			l[i].Thickness = cfg.Thickness
+			l[i].Transparency = trans
+		end
+	end
+
+	if cfg.HealthBar and self.Humanoid then
+		local barW = cfg.HealthBarWidth
+		local bx = minX - 7 - barW
+		local byMid = bx + barW * 0.5
+		self.HealthBg.From = Vector2.new(byMid, minY)
+		self.HealthBg.To = Vector2.new(byMid, maxY)
+		self.HealthBg.Thickness = barW + 2
+		self.HealthBg.Transparency = trans
+
+		local frac = math.clamp(self.Humanoid.Health / self.Humanoid.MaxHealth, 0, 1)
+		self.HealthFill.From = Vector2.new(byMid, maxY)
+		self.HealthFill.To = Vector2.new(byMid, maxY - height * frac)
+		self.HealthFill.Thickness = barW
+		self.HealthFill.Transparency = trans
+		self.HealthFill.Color = Color3.fromRGB(255, 60, 60):Lerp(Color3.fromRGB(80, 255, 80), frac)
+	end
+
+	if cfg.HealthText and self.Humanoid then
+		self.HealthText.Text = tostring(math.clamp(math.floor(self.Humanoid.Health + 0.5), 0, 9999))
+		local b = self.HealthText.TextBounds
+		local bx = minX - 7 - cfg.HealthBarWidth
+		self.HealthText.Position = Vector2.new(bx - b.X - 3, (minY + maxY) * 0.5 - b.Y * 0.5)
+		self.HealthText.Transparency = trans
+	end
+
+	if cfg.Nametag then
+		local name = self.Player and self.Player.DisplayName or model.Name
+		self.NameTag.Text = name
+		local b = self.NameTag.TextBounds
+		self.NameTag.Position = Vector2.new((minX + maxX) * 0.5 - b.X * 0.5, minY - b.Y - 3)
+		self.NameTag.Color = chosen
+		self.NameTag.Transparency = trans
+		self.NameTag.Size = cfg.TextSize
+	end
+
+	if cfg.Distance then
+		self.DistanceTag.Text = string.format("%dm", math.floor(dist + 0.5))
+		local b = self.DistanceTag.TextBounds
+		self.DistanceTag.Position = Vector2.new((minX + maxX) * 0.5 - b.X * 0.5, maxY + 2)
+		self.DistanceTag.Transparency = trans
+	end
 
 	self:SetVisible(true)
 end
 
-function Target:SetVisible(visible)
-	self.Visible = visible
+function Target:SetVisible(v)
+	self.Visible = v
 	self:_syncVisible()
 end
 
@@ -297,9 +481,24 @@ function Target:_syncVisible()
 	if not Drawing then
 		return
 	end
-	local show = self.Visible and self.Manager.Config.Enabled and self.Manager.Config.Corner
+	local cfg = self.Manager.Config
+	local show = self.Visible and cfg.Enabled
+	self.HealthBg.Visible = show and cfg.HealthBar and self.Humanoid ~= nil
+	self.HealthFill.Visible = show and cfg.HealthBar and self.Humanoid ~= nil
+	self.HealthText.Visible = show and cfg.HealthText and self.Humanoid ~= nil
+	self.NameTag.Visible = show and cfg.Nametag
+	self.DistanceTag.Visible = show and cfg.Distance
+
+	local boxShow = show and cfg.Corner
 	for i = 1, 8 do
-		self.Lines[i].Visible = show
+		self.Lines[i].Visible = boxShow
+	end
+	if show and cfg.Corner then
+		for i = 1, 8 do
+			self.Lines[i].Color = self.CurrentColor
+		end
+		self.NameTag.Color = self.CurrentColor
+		self.DistanceTag.Color = self.CurrentColor
 	end
 end
 
@@ -307,40 +506,54 @@ function Target:ApplyConfig()
 	if not Drawing then
 		return
 	end
-	local config = self.Manager.Config
+	local cfg = self.Manager.Config
+	local trans = 1 - cfg.Transparency
 	for i = 1, 8 do
-		local line = self.Lines[i]
-		line.Color = config.Color
-		line.Thickness = config.Thickness
-		line.Transparency = 1 - config.Transparency
+		self.Lines[i].Thickness = cfg.Thickness
+		self.Lines[i].Transparency = trans
+		self.Lines[i].Color = self.CurrentColor
 	end
+	self.HealthBg.Thickness = cfg.HealthBarWidth + 2
+	self.HealthBg.Transparency = trans
+	self.HealthFill.Thickness = cfg.HealthBarWidth
+	self.HealthFill.Transparency = trans
+	self.HealthText.Size = cfg.TextSize
+	self.HealthText.Transparency = trans
+	self.NameTag.Size = cfg.TextSize
+	self.NameTag.Transparency = trans
+	self.DistanceTag.Size = math.max(cfg.TextSize - 1, 11)
+	self.DistanceTag.Transparency = trans
 	self:_syncVisible()
 end
 
 function Target:Destroy()
-	for _, connection in ipairs(self.Connections) do
-		connection:Disconnect()
+	for _, c in ipairs(self.Connections) do
+		c:Disconnect()
 	end
 	table.clear(self.Connections)
 	if Drawing then
 		for i = 1, 8 do
 			self.Lines[i]:Remove()
 		end
+		self.HealthBg:Remove()
+		self.HealthFill:Remove()
+		self.HealthText:Remove()
+		self.NameTag:Remove()
+		self.DistanceTag:Remove()
 	end
 	table.clear(self.Lines)
 end
 
 local NuclideESP = {}
 NuclideESP.__index = NuclideESP
-
 NuclideESP.Name = "NuclideESP"
 NuclideESP.Version = "0.0.1"
 
 function NuclideESP.new()
 	local self = setmetatable({}, NuclideESP)
 	self.Config = {}
-	for key, value in pairs(DEFAULT_CONFIG) do
-		self.Config[key] = value
+	for k, v in pairs(DEFAULT_CONFIG) do
+		self.Config[k] = v
 	end
 	self.Targets = {}
 	self.Running = false
@@ -389,12 +602,12 @@ function NuclideESP:_update()
 	if not self.Config.Enabled then
 		return
 	end
-	local camera = Workspace.CurrentCamera
-	if not camera then
+	local cam = Workspace.CurrentCamera
+	if not cam then
 		return
 	end
-	for _, target in pairs(self.Targets) do
-		target:Update(camera)
+	for _, t in pairs(self.Targets) do
+		t:Update(cam)
 	end
 end
 
@@ -408,10 +621,10 @@ function NuclideESP:Track(model)
 end
 
 function NuclideESP:Untrack(model)
-	local target = self.Targets[model]
-	if target then
+	local t = self.Targets[model]
+	if t then
 		self.Targets[model] = nil
-		target:Destroy()
+		t:Destroy()
 	end
 	return self
 end
@@ -429,31 +642,30 @@ function NuclideESP:TrackPlayers()
 	end
 	self.PlayersBound = true
 
-	local function bind(player)
-		if player == LocalPlayer then
+	local function bind(pl)
+		if self.Targets[pl] then
 			return
 		end
-		self.Targets[player] = Target.new(self, player, true)
+		self.Targets[pl] = Target.new(self, pl, true)
 	end
 
-	for _, player in ipairs(Players:GetPlayers()) do
-		bind(player)
+	for _, pl in ipairs(Players:GetPlayers()) do
+		bind(pl)
 	end
-
 	self.PlayerAddedConnection = Players.PlayerAdded:Connect(bind)
-	self.PlayerRemovingConnection = Players.PlayerRemoving:Connect(function(player)
-		local target = self.Targets[player]
-		if target then
-			self.Targets[player] = nil
-			target:Destroy()
+	self.PlayerRemovingConnection = Players.PlayerRemoving:Connect(function(pl)
+		local t = self.Targets[pl]
+		if t then
+			self.Targets[pl] = nil
+			t:Destroy()
 		end
 	end)
 	return self
 end
 
 function NuclideESP:Clear()
-	for _, target in pairs(self.Targets) do
-		target:Destroy()
+	for _, t in pairs(self.Targets) do
+		t:Destroy()
 	end
 	table.clear(self.Targets)
 	return self
@@ -466,8 +678,8 @@ end
 
 function NuclideESP:Disable()
 	self.Config.Enabled = false
-	for _, target in pairs(self.Targets) do
-		target:SetVisible(false)
+	for _, t in pairs(self.Targets) do
+		t:SetVisible(false)
 	end
 	return self
 end
@@ -485,29 +697,41 @@ function NuclideESP:IsEnabled()
 	return self.Config.Enabled
 end
 
-function NuclideESP:SetConfig(overrides)
-	for key, value in pairs(overrides) do
-		self.Config[key] = value
+function NuclideESP:SetConfig(over)
+	for k, v in pairs(over) do
+		self.Config[k] = v
 	end
-	local config = self.Config
-	config.MaxDistance = math.max(config.MaxDistance, 0)
-	config.Thickness = math.clamp(config.Thickness, 1, 8)
-	config.Transparency = math.clamp(config.Transparency, 0, 1)
-	config.CornerLengthFraction = math.clamp(config.CornerLengthFraction, 0.05, 0.5)
-	config.MeasureInterval = math.max(config.MeasureInterval, 0.2)
-	for _, target in pairs(self.Targets) do
-		target:ApplyConfig()
+	local c = self.Config
+	c.MaxDistance = math.max(c.MaxDistance, 0)
+	c.Thickness = math.clamp(c.Thickness, 1, 8)
+	c.Transparency = math.clamp(c.Transparency, 0, 1)
+	c.CornerLengthFraction = math.clamp(c.CornerLengthFraction, 0.05, 0.5)
+	c.MeasureInterval = math.max(c.MeasureInterval, 0.2)
+	c.HealthBarWidth = math.clamp(c.HealthBarWidth, 1, 10)
+	c.TextSize = math.clamp(c.TextSize, 8, 24)
+	for _, t in pairs(self.Targets) do
+		t:ApplyConfig()
+	end
+	return self
+end
+
+function NuclideESP:Unload()
+	self:Stop()
+	if getgenv then
+		getgenv().NuclideESP = nil
+	else
+		shared.NuclideESP = nil
 	end
 	return self
 end
 
 if Drawing then
-	local instance = NuclideESP.new()
-	instance:Start()
+	local inst = NuclideESP.new()
+	inst:Start()
 	if getgenv then
-		getgenv().NuclideESP = instance
+		getgenv().NuclideESP = inst
 	else
-		shared.NuclideESP = instance
+		shared.NuclideESP = inst
 	end
 else
 	warn("NuclideESP: Drawing API is not available (requires an executor).")
