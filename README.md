@@ -18,8 +18,8 @@
 
 | Module | Version | Status |
 | :--- | :--- | :--- |
-| 🎯 **NuclideESP** | `0.0.1` | 🚧 In development |
-| 🗂️ **UI Shell** | `0.0.1` | ✅ Stable |
+| 🎯 **NuclideESP** | `0.0.1` | ✅ Corner box ESP, config: color / thickness / transparency |
+| 🗂️ **UI Shell** | `0.0.1` | ✅ ESP tab with full control |
 
 ---
 
@@ -38,6 +38,6 @@ No keys. No obfuscation. No hidden code.
 
 ---
 
-**Made with ❤️ by the AXEL TEAM.**
+**Made with ❤️ by the Nuclide team.**
 
 </div>
