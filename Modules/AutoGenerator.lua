@@ -3,10 +3,12 @@ local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 
 local PROGRESS_PER_CLICK = 2
+local STAGE_COMPLETE = 100
 local STAGE_THRESHOLDS = {26, 52, 78, 100}
-local INTERACT_DISTANCE = 12
-local SCAN_INTERVAL = 0.5
-local MAP_REFRESH_INTERVAL = 2
+local INTERACT_DISTANCE = 20
+local ENTER_COOLDOWN_MS = 800
+local SCAN_INTERVAL = 0.2
+local MAP_REFRESH_INTERVAL = 1.5
 
 local AutoGenerator = {}
 AutoGenerator.__index = AutoGenerator
@@ -17,18 +19,20 @@ function AutoGenerator.new()
 	self.Enabled = false
 	self.DelayMs = 100
 	self.StagesCompleted = 0
-	self.ClicksSent = 0
+	self.GeneratorsCompleted = 0
 
 	self._mapFolder = nil
 	self._remotes = {RF = nil, RE = nil}
 	self._currentGenerator = nil
 	self._insideGenerator = false
 	self._lastClick = 0
+	self._lastEnter = 0
+	self._lastSeenProgress = {}
 	self._connections = {}
 	self._running = false
 	self._nextScan = 0
 	self._nextMapRefresh = 0
-	self._lastCompletedStage = 0
+	self._stagesCountedForCurrent = 0
 
 	return self
 end
@@ -39,29 +43,41 @@ end
 
 function AutoGenerator:ResetStats()
 	self.StagesCompleted = 0
-	self.ClicksSent = 0
-	self._lastCompletedStage = 0
+	self.GeneratorsCompleted = 0
+	self._lastSeenProgress = {}
+	self._stagesCountedForCurrent = 0
+end
+
+function AutoGenerator:Diagnostics()
+	local map = Workspace:FindFirstChild("Map")
+	local ingame = map and map:FindFirstChild("Ingame")
+	local folder = ingame and ingame:FindFirstChild("Map")
+	local generators = folder and folder:GetChildren() or {}
+	local genCount = 0
+	for _, c in ipairs(generators) do
+		if c.Name == "Generator" then genCount = genCount + 1 end
+	end
+	return {
+		mapLoaded = folder ~= nil,
+		rfFound = self._remotes.RF ~= nil,
+		reFound = self._remotes.RE ~= nil,
+		generatorCount = genCount,
+		enabled = self.Enabled,
+		currentGenerator = self._currentGenerator ~= nil,
+		inside = self._insideGenerator,
+	}
 end
 
 function AutoGenerator:GetStats()
 	return {
-		enabled = self.Enabled,
-		delayMs = self.DelayMs,
 		stagesCompleted = self.StagesCompleted,
-		clicksSent = self.ClicksSent,
-		currentGenerator = self._currentGenerator,
-		insideGenerator = self._insideGenerator,
-		progress = self:_getCurrentProgress(),
-		stage = self:_getCurrentStage(),
-		clicksUntilNextStage = self:_clicksUntilNextStage(),
-		clicksUntilDone = self:_clicksUntilDone(),
+		generatorsCompleted = self.GeneratorsCompleted,
 	}
 end
 
 function AutoGenerator:Start()
 	if self._running then return end
 	self._running = true
-
 	self:_refreshMap()
 
 	local conn = RunService.Heartbeat:Connect(function(dt)
@@ -89,6 +105,7 @@ function AutoGenerator:SetEnabled(value)
 	if not self.Enabled then
 		self._currentGenerator = nil
 		self._insideGenerator = false
+		self._stagesCountedForCurrent = 0
 	end
 end
 
@@ -118,28 +135,30 @@ function AutoGenerator:_refreshMap()
 end
 
 function AutoGenerator:_resolveRemotes(mapFolder)
+	self._remotes = {RF = nil, RE = nil}
+	if not mapFolder then return end
+
 	local children = mapFolder:GetChildren()
-	local remotesParent = children[13]
-	local remotesFolder = nil
-	if remotesParent then
-		remotesFolder = remotesParent:FindFirstChild("Remotes")
-	end
-	if not remotesFolder then
-		for _, child in ipairs(children) do
-			local r = child:FindFirstChild("Remotes")
-			if r then
-				remotesParent = child
-				remotesFolder = r
-				break
-			end
+
+	local function tryRemotes(parent)
+		if not parent then return end
+		local r = parent:FindFirstChild("Remotes")
+		if not r then return end
+		local rf = r:FindFirstChild("RF")
+		local re = r:FindFirstChild("RE")
+		if rf and re then
+			self._remotes.RF = rf
+			self._remotes.RE = re
+			return true
 		end
+		return false
 	end
-	if not remotesFolder then
-		self._remotes = {RF = nil, RE = nil}
-		return
+
+	if tryRemotes(children[13]) then return end
+	if tryRemotes(children[14]) then return end
+	for _, child in ipairs(children) do
+		if tryRemotes(child) then return end
 	end
-	self._remotes.RF = remotesFolder:FindFirstChild("RF")
-	self._remotes.RE = remotesFolder:FindFirstChild("RE")
 end
 
 function AutoGenerator:_getLocalCharacter()
@@ -150,7 +169,9 @@ end
 
 function AutoGenerator:_getRootPart(character)
 	if not character then return nil end
-	return character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso")
+	return character:FindFirstChild("HumanoidRootPart")
+		or character:FindFirstChild("Torso")
+		or character:FindFirstChild("UpperTorso")
 end
 
 function AutoGenerator:_getGenerators()
@@ -177,6 +198,17 @@ function AutoGenerator:_getNearestGenerator()
 				best = gen
 				bestDist = dist
 			end
+		else
+			for _, part in ipairs(gen:GetChildren()) do
+				if part:IsA("BasePart") then
+					local dist = (part.Position - root.Position).Magnitude
+					if dist < bestDist then
+						best = gen
+						bestDist = dist
+					end
+					break
+				end
+			end
 		end
 	end
 	return best
@@ -189,79 +221,80 @@ function AutoGenerator:_getProgressValue(generator)
 	local data = progress:FindFirstChild("Data")
 	if not data then return nil end
 	local val = data:FindFirstChild("Value")
+	if not val then
+		for _, child in ipairs(data:GetChildren()) do
+			if child:IsA("NumberValue") then val = child; break end
+		end
+	end
 	if not val or not val:IsA("NumberValue") then return nil end
 	return val.Value
 end
 
-function AutoGenerator:_getCurrentProgress()
-	return self:_getProgressValue(self._currentGenerator)
-end
-
-function AutoGenerator:_getCurrentStage()
-	local progress = self:_getCurrentProgress()
-	if not progress then return 0 end
-	if progress >= 100 then return 4 end
-	if progress >= 78 then return 3 end
-	if progress >= 52 then return 2 end
-	if progress >= 26 then return 1 end
-	return 0
-end
-
-function AutoGenerator:_clicksUntilNextStage()
-	local progress = self:_getCurrentProgress()
-	if not progress then return 0 end
-	local target = 100
-	for _, threshold in ipairs(STAGE_THRESHOLDS) do
-		if threshold > progress then
-			target = threshold
-			break
-		end
-	end
-	return math.max(0, math.ceil((target - progress) / PROGRESS_PER_CLICK))
-end
-
-function AutoGenerator:_clicksUntilDone()
-	local progress = self:_getCurrentProgress()
-	if not progress then return 0 end
-	return math.max(0, math.ceil((100 - progress) / PROGRESS_PER_CLICK))
-end
-
 function AutoGenerator:_enterGenerator(generator)
-	if self._insideGenerator and self._currentGenerator == generator then return end
+	if not generator then return false end
 	local rf = self._remotes.RF
-	if not rf or not generator then return end
-	local success = pcall(function()
+	if not rf then return false end
+	local now = tick() * 1000
+	if self._insideGenerator and self._currentGenerator == generator then
+		if now - self._lastEnter < ENTER_COOLDOWN_MS then return true end
+	end
+	if now - self._lastEnter < 300 then return self._insideGenerator end
+	local ok = pcall(function()
 		rf:InvokeServer("Enter")
 	end)
-	if success then
+	if ok then
 		self._insideGenerator = true
 		self._currentGenerator = generator
+		self._lastEnter = now
+		self._lastClick = now + 300
+		self._stagesCountedForCurrent = self:_countStagesFor(generator)
+		return true
 	end
+	return false
+end
+
+function AutoGenerator:_countStagesFor(generator)
+	local progress = self:_getProgressValue(generator) or 0
+	local count = 0
+	for _, t in ipairs(STAGE_THRESHOLDS) do
+		if progress >= t then count = count + 1 end
+	end
+	return count
 end
 
 function AutoGenerator:_clickRepair()
 	local re = self._remotes.RE
-	if not re then return end
-	local beforeProgress = self:_getCurrentProgress() or 0
-	local success = pcall(function()
+	if not re then return false end
+	local beforeProgress = self:_getProgressValue(self._currentGenerator) or 0
+	local stagesBefore = 0
+	for _, t in ipairs(STAGE_THRESHOLDS) do
+		if beforeProgress >= t then stagesBefore = stagesBefore + 1 end
+	end
+
+	local ok = pcall(function()
 		re:FireServer()
 	end)
-	if success then
-		self.ClicksSent = self.ClicksSent + 1
-		local afterProgress = self:_getProgressValue(self._currentGenerator) or beforeProgress
-		local stageBefore = 0
-		for _, t in ipairs(STAGE_THRESHOLDS) do
-			if beforeProgress >= t then stageBefore = stageBefore + 1 end
-		end
-		local stageAfter = 0
-		for _, t in ipairs(STAGE_THRESHOLDS) do
-			if afterProgress >= t then stageAfter = stageAfter + 1 end
-		end
-		if stageAfter > stageBefore then
-			self.StagesCompleted = self.StagesCompleted + (stageAfter - stageBefore)
-			self._lastCompletedStage = stageAfter
-		end
+	if not ok then return false end
+
+	task.wait(0.05)
+	local afterProgress = self:_getProgressValue(self._currentGenerator) or beforeProgress
+	local stagesAfter = 0
+	for _, t in ipairs(STAGE_THRESHOLDS) do
+		if afterProgress >= t then stagesAfter = stagesAfter + 1 end
 	end
+	if stagesAfter > stagesBefore then
+		self.StagesCompleted = self.StagesCompleted + (stagesAfter - stagesBefore)
+	end
+
+	if afterProgress >= STAGE_COMPLETE then
+		self.GeneratorsCompleted = self.GeneratorsCompleted + 1
+		self._insideGenerator = false
+		self._currentGenerator = nil
+		self._stagesCountedForCurrent = 0
+		return true, true
+	end
+
+	return true, false
 end
 
 function AutoGenerator:_tick(dt)
@@ -290,30 +323,41 @@ function AutoGenerator:_tick(dt)
 	end
 
 	local progress = self:_getProgressValue(nearest)
-	if progress == nil or progress >= 100 then
-		if self._currentGenerator == nearest and progress == 100 then
+	if progress == nil then return end
+
+	if progress >= STAGE_COMPLETE then
+		if self._currentGenerator == nearest then
 			self._insideGenerator = false
+			self._currentGenerator = nil
 		end
-		self._currentGenerator = nil
 		return
 	end
 
-	self._currentGenerator = nearest
-	self:_enterGenerator(nearest)
+	if self._currentGenerator ~= nearest then
+		self._currentGenerator = nearest
+		self._insideGenerator = false
+	end
 
-	if not self._insideGenerator then return end
+	if not self:_enterGenerator(nearest) then return end
 
 	local now = tick() * 1000
 	if now - self._lastClick >= self.DelayMs then
 		local currentProgress = self:_getCurrentProgress()
-		if currentProgress and currentProgress < 100 then
-			self:_clickRepair()
-			self._lastClick = now
+		if currentProgress and currentProgress < STAGE_COMPLETE then
+			local clicked, finished = self:_clickRepair()
+			if clicked then
+				self._lastClick = now
+			end
+			if finished then return end
 		else
 			self._insideGenerator = false
 			self._currentGenerator = nil
 		end
 	end
+end
+
+function AutoGenerator:_getCurrentProgress()
+	return self:_getProgressValue(self._currentGenerator)
 end
 
 return AutoGenerator

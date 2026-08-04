@@ -390,24 +390,30 @@ ObjectsTab:CreateColorPicker({
 	end
 })
 
-TasksTab:CreateSection("Auto Generator")
+TasksTab:CreateSection("Settings")
 
-local autoGenToggle = TasksTab:CreateToggle({
+TasksTab:CreateToggle({
 	name = "Auto Generator",
 	flag = "AutoGenEnabled",
 	value = false,
 	callback = function(Value)
 		autoGen:SetEnabled(Value)
 		if Value then
-			Window:Notify({ title = "Tasks", content = "Auto Generator enabled" })
-		else
-			Window:Notify({ title = "Tasks", content = "Auto Generator disabled" })
+			local diag = autoGen:Diagnostics()
+			local msg = string.format(
+				"Map: %s | RF: %s | RE: %s | Generators: %d",
+				diag.mapLoaded and "OK" or "not loaded",
+				diag.rfFound and "OK" or "NOT FOUND",
+				diag.reFound and "OK" or "NOT FOUND",
+				diag.generatorCount
+			)
+			Window:Notify({ title = "Auto Generator", content = msg, duration = 5 })
 		end
 	end,
 })
 
 TasksTab:CreateSlider({
-	name = "Delay per stage tick",
+	name = "Tick delay",
 	flag = "AutoGenDelay",
 	range = {1, 1000},
 	increment = 1,
@@ -422,62 +428,43 @@ TasksTab:CreateButton({
 	name = "Reset Statistics",
 	callback = function()
 		autoGen:ResetStats()
-		Window:Notify({ title = "Tasks", content = "Statistics reset" })
 	end,
 })
 
-TasksTab:CreateSection("Statistics")
+TasksTab:CreateButton({
+	name = "Diagnostics",
+	callback = function()
+		local diag = autoGen:Diagnostics()
+		local msg = string.format(
+			"Map: %s\nRF remote: %s\nRE remote: %s\nGenerators on map: %d\nActive target: %s\nInside generator: %s",
+			diag.mapLoaded and "Loaded" or "Not loaded",
+			diag.rfFound and "Found" or "Not found",
+			diag.reFound and "Found" or "Not found",
+			diag.generatorCount,
+			diag.currentGenerator and "Yes" or "No",
+			diag.inside and "Yes" or "No"
+		)
+		Window:Notify({ title = "Diagnostics", content = msg, duration = 8 })
+	end,
+})
 
-local statRow = TasksTab:CreateGroup()
-local col1 = statRow:CreateGroup({ direction = "column" })
-local col2 = statRow:CreateGroup({ direction = "column" })
+TasksTab:CreateSection("Progress")
 
-local stagesStat = col1:CreateStat({
+local progressRow = TasksTab:CreateGroup()
+local pcol1 = progressRow:CreateGroup({ direction = "column" })
+local pcol2 = progressRow:CreateGroup({ direction = "column" })
+
+local stagesStat = pcol1:CreateStat({
 	name = "Stages completed",
 	value = 0,
 	compact = true,
 })
 
-local clicksStat = col2:CreateStat({
-	name = "Clicks sent",
+local generatorsStat = pcol2:CreateStat({
+	name = "Generators done",
 	value = 0,
 	compact = true,
 })
-
-local progressStat = col1:CreateStat({
-	name = "Current progress",
-	value = 0,
-	suffix = "%",
-	compact = true,
-})
-
-local stageStat = col2:CreateStat({
-	name = "Current stage",
-	value = 0,
-	suffix = "/4",
-	compact = true,
-})
-
-local clicksNextStat = col1:CreateStat({
-	name = "Clicks to next stage",
-	value = 0,
-	compact = true,
-})
-
-local clicksDoneStat = col2:CreateStat({
-	name = "Clicks to complete",
-	value = 0,
-	compact = true,
-})
-
-local statusStat = TasksTab:CreateButton({
-	name = "Status: Idle",
-	callback = function() end,
-})
-
-local function setStatus(text)
-	pcall(function() statusStat:Set({ name = "Status: " .. text }) end)
-end
 
 task.spawn(function()
 	while true do
@@ -485,28 +472,7 @@ task.spawn(function()
 		if not autoGen then break end
 		local stats = autoGen:GetStats()
 		stagesStat:Set(stats.stagesCompleted)
-		clicksStat:Set(stats.clicksSent)
-		if stats.currentGenerator and stats.progress then
-			progressStat:Set(stats.progress)
-			stageStat:Set(stats.stage)
-			clicksNextStat:Set(stats.clicksUntilNextStage)
-			clicksDoneStat:Set(stats.clicksUntilDone)
-			if stats.insideGenerator then
-				setStatus("Repairing...")
-			else
-				setStatus("Approaching...")
-			end
-		else
-			progressStat:Set(0)
-			stageStat:Set(0)
-			clicksNextStat:Set(0)
-			clicksDoneStat:Set(0)
-			if stats.enabled then
-				setStatus("Searching...")
-			else
-				setStatus("Idle")
-			end
-		end
+		generatorsStat:Set(stats.generatorsCompleted)
 	end
 end)
 
