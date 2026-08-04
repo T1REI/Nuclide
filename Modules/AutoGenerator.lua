@@ -5,8 +5,9 @@ local RunService = game:GetService("RunService")
 local STAGE_COMPLETE = 100
 local STAGE_THRESHOLDS = {26, 52, 78, 100}
 local FIRE_COOLDOWN_MS = 120
+local INTERACT_RADIUS = 10
 local MAP_REFRESH_INTERVAL = 1.0
-local PLAYER_UI_CHECK_INTERVAL = 0.2
+local CHECK_INTERVAL = 0.15
 
 local AutoGenerator = {}
 AutoGenerator.__index = AutoGenerator
@@ -18,20 +19,20 @@ function AutoGenerator.new()
 	self.DelayMs = 100
 	self.StagesCompleted = 0
 	self.GeneratorsCompleted = 0
-	self.Status = "Idle - enter a generator manually"
+	self.Status = "Disabled"
 
 	self._mapFolder = nil
 	self._currentGenerator = nil
 	self._insideGenerator = false
 	self._lastFire = 0
 	self._connections = {}
-	self._hookConnections = {}
-	self._originalNamecall = nil
-	self._namecallHooked = false
 	self._running = false
-	self._nextUiCheck = 0
+	self._nextCheck = 0
 	self._nextMapRefresh = 0
 	self._lastProgress = 0
+	self._speedMulConn = nil
+	self._tempUiConn = nil
+	self._watchedCharacter = nil
 
 	return self
 end
@@ -51,7 +52,7 @@ function AutoGenerator:Diagnostics()
 	local progress = self._currentGenerator and self:_getProgressValue(self._currentGenerator)
 	return {
 		mapLoaded = folder ~= nil,
-		generatorCount = #gens,
+		generatorCount = gens and #gens or 0,
 		inside = self._insideGenerator,
 		hasTarget = self._currentGenerator ~= nil,
 		progress = progress,
@@ -70,23 +71,34 @@ end
 function AutoGenerator:Start()
 	if self._running then return end
 	self._running = true
-	self:_installHooks()
+	self:_watchCharacter()
 
-	local conn = RunService.Heartbeat:Connect(function(dt)
+	local heartbeat = RunService.Heartbeat:Connect(function(dt)
 		if not self.Enabled then return end
 		self:_tick(dt)
 	end)
-	table.insert(self._connections, conn)
+	table.insert(self._connections, heartbeat)
+
+	local player = Players.LocalPlayer
+	if player then
+		local charAdded = player.CharacterAdded:Connect(function(char)
+			self:_bindCharacter(char)
+		end)
+		table.insert(self._connections, charAdded)
+		if player.Character then
+			self:_bindCharacter(player.Character)
+		end
+	end
 end
 
 function AutoGenerator:Stop()
 	self.Enabled = false
 	self._running = false
-	self:_cleanupHooks()
 	for _, c in ipairs(self._connections) do
 		c:Disconnect()
 	end
 	table.clear(self._connections)
+	self:_unbindCharacter()
 	self._mapFolder = nil
 	self._currentGenerator = nil
 	self._insideGenerator = false
@@ -98,131 +110,149 @@ function AutoGenerator:SetEnabled(value)
 	if not self.Enabled then
 		self._currentGenerator = nil
 		self._insideGenerator = false
-		self.Status = "Idle - enter a generator manually"
+		self.Status = "Waiting - enter a generator manually"
+	else
+		self.Status = "Waiting - enter a generator manually"
 	end
 end
 
-function AutoGenerator:_cleanupHooks()
-	for _, c in ipairs(self._hookConnections) do
-		c:Disconnect()
-	end
-	table.clear(self._hookConnections)
-	if self._originalNamecall then
-		pcall(hookmetamethod, game, "__namecall", self._originalNamecall)
-		self._originalNamecall = nil
-		self._namecallHooked = false
+function AutoGenerator:_watchCharacter()
+	local player = Players.LocalPlayer
+	if not player then return end
+	if player.Character and player.Character ~= self._watchedCharacter then
+		self:_bindCharacter(player.Character)
 	end
 end
 
-function AutoGenerator:_installHooks()
-	self:_cleanupHooks()
+function AutoGenerator:_unbindCharacter()
+	if self._speedMulConn then
+		self._speedMulConn:Disconnect()
+		self._speedMulConn = nil
+	end
+	if self._tempUiConn then
+		self._tempUiConn:Disconnect()
+		self._tempUiConn = nil
+	end
+	self._watchedCharacter = nil
+end
 
-	if not self._namecallHooked then
-		local oldNamecall = getmetatable(game).__namecall
-		local newNamecall = function(...)
-			local selfRef = select(1, ...)
-			local method = getnamecallmethod()
-			if method == "InvokeServer"
-				and type(selfRef) == "userdata"
-				and pcall(game.IsA, selfRef, "RemoteFunction")
-			then
-				local parent = selfRef.Parent
-				if parent and parent.Name == "Remotes" then
-					local gen = parent.Parent
-					if gen and gen:IsA("Model") then
-						local msg = select(2, ...)
-						if msg == "Enter" then
-							local results = table.pack(oldNamecall(...))
-							local status = results[1]
-							if status == "fixing" then
-								self:_onEnteredGenerator(gen)
-							elseif status == "leftAlready" then
-								self:_onLeftGenerator(gen)
-							end
-							return table.unpack(results, 1, results.n)
-						elseif msg == "Leave" then
-							self:_onLeftGenerator(gen)
-						end
-					end
+function AutoGenerator:_bindCharacter(character)
+	self:_unbindCharacter()
+	self._watchedCharacter = character
+
+	self._speedMulConn = character.ChildAdded:Connect(function(child)
+		if child.Name == "SpeedMultipliers" then
+			self:_bindSpeedMultipliers(child)
+		end
+	end)
+	character.ChildRemoved:Connect(function(child)
+		if child.Name == "SpeedMultipliers" then
+			self:_onLeaveGenerator("SpeedMultipliers removed")
+		end
+	end)
+
+	local speedMuls = character:FindFirstChild("SpeedMultipliers")
+	if speedMuls then
+		self:_bindSpeedMultipliers(speedMuls)
+	end
+
+	task.spawn(function()
+		self:_bindTemporaryUi()
+	end)
+end
+
+function AutoGenerator:_bindSpeedMultipliers(folder)
+	local fixing = folder:FindFirstChild("FixingGenerator")
+	if fixing then
+		self:_onEnterGenerator()
+	end
+	folder.ChildAdded:Connect(function(child)
+		if child.Name == "FixingGenerator" then
+			self:_onEnterGenerator()
+		end
+	end)
+	folder.ChildRemoved:Connect(function(child)
+		if child.Name == "FixingGenerator" then
+			self:_onLeaveGenerator("Left generator")
+		end
+	end)
+end
+
+function AutoGenerator:_bindTemporaryUi()
+	local player = Players.LocalPlayer
+	if not player then return end
+	local pg = player:FindFirstChild("PlayerGui")
+	if not pg then return end
+
+	local function attach(tempUi)
+		if self._tempUiConn then
+			self._tempUiConn:Disconnect()
+		end
+		local function check()
+			local found = false
+			for _, child in ipairs(tempUi:GetChildren()) do
+				if child:FindFirstChild("BarHolder", true) then
+					found = true
+					break
 				end
 			end
-			return oldNamecall(...)
+			if found and not self._insideGenerator then
+				self:_onEnterGenerator()
+			elseif not found and self._insideGenerator then
+				self:_onLeaveGenerator("Fix UI closed")
+			end
 		end
-		hookmetamethod(game, "__namecall", newNamecall)
-		self._originalNamecall = oldNamecall
-		self._namecallHooked = true
-	end
-
-	local player = Players.LocalPlayer
-	if player then
-		task.spawn(function()
-			while self._running do
-				task.wait(PLAYER_UI_CHECK_INTERVAL)
-				if not self._running then break end
-				self:_checkGeneratorUi(player)
+		check()
+		self._tempUiConn = tempUi.ChildAdded:Connect(check)
+		tempUi.ChildRemoved:Connect(function(child)
+			if child:FindFirstChild("BarHolder", true) then
+				task.wait(0.1)
+				check()
 			end
 		end)
 	end
-end
 
-function AutoGenerator:_checkGeneratorUi(player)
-	local tempGui = player:FindFirstChild("PlayerGui")
-		and player.PlayerGui:FindFirstChild("TemporaryUI")
-	if not tempGui then return end
-	local hasGenUi = false
-	for _, child in ipairs(tempGui:GetChildren()) do
-		if child.Name == "GeneratorFixUi" or child:FindFirstChild("BarHolder", true) then
-			hasGenUi = true
-			break
+	local tempUi = pg:FindFirstChild("TemporaryUI")
+	if tempUi then
+		attach(tempUi)
+	end
+
+	pg.ChildAdded:Connect(function(child)
+		if child.Name == "TemporaryUI" then
+			attach(child)
 		end
-	end
-	if hasGenUi and not self._insideGenerator then
-		self:_onEnteredGenerator(self:_guessCurrentGenerator())
-	elseif not hasGenUi and self._insideGenerator then
-		self:_onLeftGenerator(self._currentGenerator)
-	end
-end
-
-function AutoGenerator:_guessCurrentGenerator()
-	local folder = self:_getMapFolder()
-	if not folder then return self._currentGenerator end
-	local char = self:_getLocalCharacter()
-	local root = self:_getRootPart(char)
-	local best, bestDist = nil, 12
-	for _, gen in ipairs(self:_findGenerators(folder)) do
-		local rf, re = self:_getGeneratorRemotes(gen)
-		if rf and re then
-			local p = self:_getProgressValue(gen)
-			if p and p < STAGE_COMPLETE then
-				local part = gen.PrimaryPart
-				if part and root then
-					local d = (part.Position - root.Position).Magnitude
-					if d < bestDist then
-						best = gen
-						bestDist = d
-					end
-				end
-			end
+	end)
+	pg.ChildRemoved:Connect(function(child)
+		if child.Name == "TemporaryUI" and self._insideGenerator then
+			self:_onLeaveGenerator("TemporaryUI removed")
 		end
-	end
-	return best or self._currentGenerator
+	end)
 end
 
-function AutoGenerator:_onEnteredGenerator(generator)
-	if not generator then return end
+function AutoGenerator:_onEnterGenerator()
+	if self._insideGenerator then return end
+	local gen = self:_findCurrentGenerator()
+	if not gen then
+		self.Status = "Entered generator but cannot locate it (too far?)"
+		return
+	end
 	self._insideGenerator = true
-	self._currentGenerator = generator
-	self._lastProgress = self:_getProgressValue(generator) or 0
-	self._lastFire = tick() * 1000 + 500
-	self.Status = "Repairing (auto-click)"
+	self._currentGenerator = gen
+	self._lastProgress = self:_getProgressValue(gen) or 0
+	self._lastFire = tick() * 1000 + 600
+	self.Status = string.format("Repairing - %d%%", self._lastProgress)
 end
 
-function AutoGenerator:_onLeftGenerator(generator)
-	if self._currentGenerator and generator and self._currentGenerator ~= generator then return end
+function AutoGenerator:_onLeaveGenerator(reason)
+	if not self._insideGenerator and not self._currentGenerator then return end
 	self._insideGenerator = false
 	self._currentGenerator = nil
 	self._lastProgress = 0
-	self.Status = self.Enabled and "Idle - enter a generator manually" or "Idle"
+	if self.Enabled then
+		self.Status = reason and reason or "Left generator"
+	else
+		self.Status = "Idle"
+	end
 end
 
 function AutoGenerator:_getMapFolder()
@@ -234,6 +264,7 @@ function AutoGenerator:_getMapFolder()
 end
 
 function AutoGenerator:_findGenerators(mapFolder)
+	if not mapFolder then return {} end
 	local result = {}
 	for _, child in ipairs(mapFolder:GetChildren()) do
 		if child:IsA("Model") then
@@ -258,23 +289,58 @@ function AutoGenerator:_getGeneratorRemotes(generator)
 	return rf, re
 end
 
-function AutoGenerator:_getLocalCharacter()
+function AutoGenerator:_getRootPart()
 	local player = Players.LocalPlayer
 	if not player then return nil end
-	return player.Character
+	local char = player.Character
+	if not char then return nil end
+	return char:FindFirstChild("HumanoidRootPart")
+		or char:FindFirstChild("Torso")
+		or char:FindFirstChild("UpperTorso")
 end
 
-function AutoGenerator:_getRootPart(character)
-	if not character then return nil end
-	return character:FindFirstChild("HumanoidRootPart")
-		or character:FindFirstChild("Torso")
-		or character:FindFirstChild("UpperTorso")
+function AutoGenerator:_findCurrentGenerator()
+	local folder = self:_getMapFolder()
+	if not folder then return nil end
+	local root = self:_getRootPart()
+	if not root then return nil end
+
+	local best, bestDist = nil, INTERACT_RADIUS
+	for _, gen in ipairs(self:_findGenerators(folder)) do
+		local _, re = self:_getGeneratorRemotes(gen)
+		if re then
+			local progress = self:_getProgressValue(gen)
+			if progress and progress < STAGE_COMPLETE then
+				local part = gen.PrimaryPart
+				if not part then
+					for _, d in ipairs(gen:GetDescendants()) do
+						if d:IsA("BasePart") then part = d; break end
+					end
+				end
+				if part then
+					local dist = (part.Position - root.Position).Magnitude
+					if dist < bestDist then
+						best = gen
+						bestDist = dist
+					end
+				end
+			end
+		end
+	end
+	return best
 end
 
 function AutoGenerator:_getProgressValue(generator)
 	if not generator then return nil end
 	local progress = generator:FindFirstChild("Progress")
-	if not progress then return nil end
+	if not progress then
+		for _, d in ipairs(generator:GetDescendants()) do
+			if d.Name == "Progress" and d:IsA("NumberValue") then
+				return d.Value
+			end
+		end
+		return nil
+	end
 	if progress:IsA("NumberValue") then return progress.Value end
 	local val = progress:FindFirstChild("Value")
 	if val and val:IsA("NumberValue") then return val.Value end
@@ -298,9 +364,9 @@ function AutoGenerator:_sendRepair()
 		self._insideGenerator = false
 		return false
 	end
-	local rf, re = self:_getGeneratorRemotes(gen)
+	local _, re = self:_getGeneratorRemotes(gen)
 	if not re then
-		self.Status = "RE not found in generator"
+		self.Status = "Generator RE not found"
 		return false
 	end
 
@@ -311,7 +377,7 @@ function AutoGenerator:_sendRepair()
 		re:FireServer()
 	end)
 	if not ok then
-		self.Status = "Failed to fire repair event"
+		self.Status = "Failed to send repair"
 		return false
 	end
 
@@ -333,7 +399,7 @@ function AutoGenerator:_sendRepair()
 		return true, true
 	end
 
-	self.Status = string.format("Repairing (auto-click) - %d%%", afterProgress)
+	self.Status = string.format("Repairing - %d%%", afterProgress)
 	return true, false
 end
 
@@ -345,15 +411,20 @@ function AutoGenerator:_tick(dt)
 	end
 
 	if not self._insideGenerator then
-		if self.Enabled then
-			self.Status = "Idle - enter a generator manually"
+		if self.Enabled and self.Status ~= "Waiting - enter a generator manually" then
+			self.Status = "Waiting - enter a generator manually"
 		end
 		return
 	end
 
 	if not self._currentGenerator then
-		self._insideGenerator = false
-		return
+		local gen = self:_findCurrentGenerator()
+		if gen then
+			self._currentGenerator = gen
+		else
+			self:_onLeaveGenerator("Lost generator target")
+			return
+		end
 	end
 
 	local progress = self:_getProgressValue(self._currentGenerator)

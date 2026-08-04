@@ -434,7 +434,7 @@ TasksTab:CreateButton({
 	callback = function()
 		local diag = autoGen:Diagnostics()
 		local msg = string.format(
-			"Map: %s\nGenerators on map: %d\nInside generator (manual): %s\nActive repair target: %s\nCurrent progress: %s%%\nStatus: %s",
+			"Map: %s\nGenerators on map: %d\nIs player repairing: %s\nAuto-repair target: %s\nProgress: %s%%\nStatus: %s",
 			diag.mapLoaded and "Loaded" or "Not loaded",
 			diag.generatorCount,
 			diag.inside and "Yes" or "No",
