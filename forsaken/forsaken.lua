@@ -4,6 +4,7 @@ local Workspace = game:GetService("Workspace")
 local ESPClass = loadstring(game:HttpGet("https://raw.githubusercontent.com/T1REI/Nuclide/refs/heads/main/Modules/ESP.lua?t=" .. os.time()))()
 local ChamsClass = loadstring(game:HttpGet("https://raw.githubusercontent.com/T1REI/Nuclide/refs/heads/main/Modules/Chams.lua?t=" .. os.time()))()
 local AutoGeneratorClass = loadstring(game:HttpGet("https://raw.githubusercontent.com/T1REI/Nuclide/refs/heads/main/Modules/AutoGenerator.lua?t=" .. os.time()))()
+local ExploitsClass = loadstring(game:HttpGet("https://raw.githubusercontent.com/T1REI/Nuclide/refs/heads/main/Modules/Exploits.lua?t=" .. os.time()))()
 
 local espInstance = ESPClass.new()
 espInstance:Start()
@@ -13,6 +14,9 @@ chamsInstance:Start()
 
 local autoGen = AutoGeneratorClass.new()
 autoGen:Start()
+
+local exploits = ExploitsClass.new()
+exploits:Start()
 
 local killerESP = espInstance:CreateGroup("Killers")
 local survivorESP = espInstance:CreateGroup("Survivors")
@@ -161,6 +165,7 @@ local KillerTab = Window:CreateTab({ name = "Killer ESP" })
 local SurvivorTab = Window:CreateTab({ name = "Survivor ESP" })
 local ObjectsTab = Window:CreateTab({ name = "Objects ESP" })
 local TasksTab = Window:CreateTab({ name = "Tasks" })
+local ExploitsTab = Window:CreateTab({ name = "Exploits" })
 local MiscTab = Window:CreateTab({ name = "Misc" })
 
 local killerConfig = {
@@ -474,6 +479,65 @@ task.spawn(function()
 	end
 end)
 
+ExploitsTab:CreateSection("1. Stamina")
+
+ExploitsTab:CreateToggle({
+	name = "Infinite Stamina",
+	flag = "InfiniteStamina",
+	value = false,
+	callback = function(Value)
+		exploits:SetInfiniteStamina(Value)
+	end,
+})
+
+ExploitsTab:CreateSection("2. Movement")
+
+ExploitsTab:CreateSlider({
+	name = "Speed Multiplier",
+	flag = "SpeedMultiplier",
+	range = {1.0, 5.0},
+	increment = 0.1,
+	suffix = "x",
+	value = 1.0,
+	callback = function(Value)
+		exploits:SetSpeedMultiplier(Value)
+	end,
+})
+
+ExploitsTab:CreateSlider({
+	name = "FOV Multiplier",
+	flag = "FOVMultiplier",
+	range = {1.0, 2.0},
+	increment = 0.1,
+	suffix = "x",
+	value = 1.0,
+	callback = function(Value)
+		exploits:SetFOVMultiplier(Value)
+	end,
+})
+
+ExploitsTab:CreateSection("3. ESP Optimization")
+
+ExploitsTab:CreateToggle({
+	name = "Actors-based ESP",
+	flag = "ActorsESP",
+	value = false,
+	callback = function(Value)
+		exploits:SetActorsESP(Value)
+	end,
+})
+
+ExploitsTab:CreateSection("4. Emotes")
+
+ExploitsTab:CreateToggle({
+	name = "Anti-Interrupt Emotes",
+	flag = "AntiInterruptEmotes",
+	value = false,
+	callback = function(Value)
+		exploits:SetAntiInterruptEmotes(Value)
+	end,
+})
+
 local currentConfigName = "NuclideForsaken"
 
 MiscTab:CreateInput({
@@ -516,6 +580,7 @@ MiscTab:CreateButton({
 		autoGen:Stop()
 		espInstance:Destroy()
 		chamsInstance:Destroy()
+		exploits:Destroy()
 		Window:Unload()
 	end,
 })
