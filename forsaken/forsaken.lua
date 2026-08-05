@@ -242,29 +242,6 @@ ExploitsTab:CreateSection("2. Movement")
 ExploitsTab:CreateSlider({ name = "Speed Multiplier", flag = "SpeedMultiplier", range = {1.0, 5.0}, increment = 0.1, suffix = "x", value = 1.0, callback = function(Value) exploits:SetSpeedMultiplier(Value) end })
 ExploitsTab:CreateSlider({ name = "FOV Multiplier", flag = "FOVMultiplier", range = {1.0, 2.0}, increment = 0.1, suffix = "x", value = 1.0, callback = function(Value) exploits:SetFOVMultiplier(Value) end })
 
-ExploitsTab:CreateSection("3. Emotes")
-ExploitsTab:CreateToggle({ name = "Emote Walk", flag = "EmoteWalk", value = false, callback = function(Value) exploits:SetEmoteWalk(Value) end })
-ExploitsTab:CreateToggle({ name = "Anti-Interrupt Emotes", flag = "AntiInterruptEmotes", value = false, callback = function(Value) exploits:SetAntiInterruptEmotes(Value) end })
-
-ExploitsTab:CreateSection("4. Network")
-ExploitsTab:CreateToggle({
-	name = "Desync Position",
-	flag = "DesyncEnabled",
-	value = false,
-	callback = function(Value)
-		exploits:SetDesync(Value)
-	end,
-})
-ExploitsTab:CreateButton({
-	name = "Update Freeze Point",
-	callback = function()
-		if exploits.DesyncEnabled then
-			local updated = exploits:UpdateFrozenPosition()
-			Window:Notify({ title = "Desync", content = updated and "Position updated" or "No character", duration = 3 })
-		end
-	end,
-})
-
 local currentConfigName = "NuclideForsaken"
 MiscTab:CreateInput({ name = "Config File Name", placeholderText = "NuclideForsaken", callback = function(Text) if Text and Text ~= "" then currentConfigName = Text end end })
 MiscTab:CreateButton({ name = "Save Config", callback = function() if Window:Save(currentConfigName) then Window:Notify({ title = "Config System", content = "Saved: " .. currentConfigName }) else Window:Notify({ title = "Config System", content = "Failed to save configuration!" }) end end })
