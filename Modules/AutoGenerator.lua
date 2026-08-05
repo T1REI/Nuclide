@@ -4,7 +4,6 @@ local RunService = game:GetService("RunService")
 
 local STAGE_COMPLETE = 100
 local STAGE_POINTS = {26, 52, 78, 100}
-local FIRE_COOLDOWN_MS = 50
 local INTERACT_RADIUS = 10
 local MAP_REFRESH_INTERVAL = 1.0
 local TICK_INTERVAL = 0.05
@@ -23,24 +22,22 @@ function AutoGenerator.new()
 
 	self._mapFolder = nil
 	self._currentGenerator = nil
-	self._currentGenRemotes = nil
+	self._currentGenRE = nil
 	self._insideGenerator = false
+	self._repairing = false
 	self._nextFireAt = 0
 	self._connections = {}
+	self._generatorConnections = {}
 	self._running = false
 	self._nextMapRefresh = 0
-	self._startedProgress = 0
 	self._stagesAtEnter = 0
-	self._stagesCountedFromEnter = 0
-	self._enteredGenerator = nil
-	self._enterSignals = 0
-	self._completedFlag = false
+	self._stagesReachedSinceEnter = 0
 
 	return self
 end
 
 function AutoGenerator:SetDelay(ms)
-	self.DelayMs = math.clamp(math.floor(ms or 100), 1, 1000)
+	self.DelayMs = math.clamp(math.floor(ms or 100), 1, 2000)
 end
 
 function AutoGenerator:ResetStats()
@@ -91,59 +88,85 @@ function AutoGenerator:Start()
 			self:_bindCharacter(player.Character)
 		end
 
-		local pg = player:FindFirstChild("PlayerGui")
-		if pg then
-			self:_bindPlayerGui(pg)
-		else
-			local pgConn
-			pgConn = player.ChildAdded:Connect(function(child)
+		local function bindPgWhenReady()
+			local pg = player:FindFirstChild("PlayerGui")
+			if pg then
+				self:_bindPlayerGui(pg)
+				return
+			end
+			local conn
+			conn = player.ChildAdded:Connect(function(child)
 				if child:IsA("PlayerGui") then
 					self:_bindPlayerGui(child)
-					pgConn:Disconnect()
+					conn:Disconnect()
 				end
 			end)
-			table.insert(self._connections, pgConn)
+			table.insert(self._connections, conn)
 		end
+		bindPgWhenReady()
 	end
 end
 
 function AutoGenerator:Stop()
 	self.Enabled = false
 	self._running = false
-	for _, c in ipairs(self._connections) do
-		pcall(c.Disconnect, c)
-	end
-	table.clear(self._connections)
+	self:_disconnectAll()
 	self._mapFolder = nil
-	self._currentGenerator = nil
-	self._currentGenRemotes = nil
-	self._insideGenerator = false
-	self._enteredGenerator = nil
-	self._enterSignals = 0
-	self._completedFlag = false
+	self:_detachGenerator(true)
 	self.Status = "Idle"
 end
 
 function AutoGenerator:SetEnabled(value)
 	self.Enabled = value and true or false
 	if not self.Enabled then
-		self._currentGenerator = nil
-		self._currentGenRemotes = nil
-		self._insideGenerator = false
-		self._enteredGenerator = nil
-		self._stagesAtEnter = 0
-		self._stagesCountedFromEnter = 0
-		self._enterSignals = 0
-		self._completedFlag = false
+		self:_detachGenerator(false)
 		self.Status = "Disabled"
 	else
 		self.Status = "Waiting - enter a generator manually"
 	end
 end
 
+function AutoGenerator:_disconnectAll()
+	for _, c in ipairs(self._connections) do
+		pcall(c.Disconnect, c)
+	end
+	table.clear(self._connections)
+	self:_detachGenerator(true)
+end
+
+function AutoGenerator:_detachGenerator(silent)
+	for _, c in ipairs(self._generatorConnections) do
+		pcall(c.Disconnect, c)
+	end
+	table.clear(self._generatorConnections)
+
+	if self._currentGenerator and self._repairing then
+		if not silent then
+			self.GeneratorsCompleted = self.GeneratorsCompleted + 0
+		end
+	end
+
+	self._currentGenerator = nil
+	self._currentGenRE = nil
+	self._insideGenerator = false
+	self._repairing = false
+	self._stagesAtEnter = 0
+	self._stagesReachedSinceEnter = 0
+	if self.Enabled and not silent then
+		self.Status = "Waiting - enter a generator manually"
+	end
+end
+
+function AutoGenerator:_onGeneratorComplete()
+	if not self._currentGenerator then return end
+	self.GeneratorsCompleted = self.GeneratorsCompleted + 1
+	self.Status = "Generator completed - waiting for next"
+	self:_detachGenerator(true)
+end
+
 function AutoGenerator:_signalEnter()
-	self._enterSignals = self._enterSignals + 1
-	if self._insideGenerator then return end
+	if self._insideGenerator and self._repairing then return end
+	if self._repairing then return end
 	local gen = self:_findCurrentGenerator()
 	if not gen then
 		self.Status = "Signal received but generator not found"
@@ -155,39 +178,84 @@ function AutoGenerator:_signalEnter()
 		return
 	end
 	local progress = self:_getProgressValue(gen) or 0
+
+	if progress >= STAGE_COMPLETE then
+		self.Status = "Generator already complete"
+		return
+	end
+
 	self._insideGenerator = true
+	self._repairing = true
 	self._currentGenerator = gen
-	self._currentGenRemotes = re
-	self._startedProgress = progress
+	self._currentGenRE = re
 	self._stagesAtEnter = self:_countStagesAt(progress)
-	self._stagesCountedFromEnter = 0
-	self._enteredGenerator = gen
-	self._completedFlag = false
-	self._nextFireAt = 0
-	self.Status = string.format("Repairing - %d%%", progress)
+	self._stagesReachedSinceEnter = 0
+	self._nextFireAt = tick() * 1000 + self.DelayMs
+	self.Status = string.format("Waiting first tick... (%d%%)", progress)
+
+	self:_trackProgress(gen)
 end
 
 function AutoGenerator:_signalLeave()
-	self._enterSignals = math.max(0, self._enterSignals - 1)
-	if self._enterSignals > 0 then return end
-	if not self._insideGenerator then return end
-	self:_finalizeGenerator(false)
+	if not self._repairing then
+		self._insideGenerator = false
+		return
+	end
+	if self:_hasAnyFixSignal() then return end
+	self:_detachGenerator(false)
+	if self.Enabled then
+		self.Status = "Left generator"
+	else
+		self.Status = "Idle"
+	end
 end
 
-function AutoGenerator:_finalizeGenerator(completed)
-	self._insideGenerator = false
-	self._currentGenerator = nil
-	self._currentGenRemotes = nil
-	self._enteredGenerator = nil
-	self._stagesAtEnter = 0
-	self._stagesCountedFromEnter = 0
-	if completed and not self._completedFlag then
-		self.GeneratorsCompleted = self.GeneratorsCompleted + 1
-		self._completedFlag = true
-		self.Status = "Generator completed - waiting for next"
-	else
-		self.Status = self.Enabled and "Waiting - enter a generator manually" or "Idle"
+function AutoGenerator:_trackProgress(gen)
+	for _, c in ipairs(self._generatorConnections) do
+		pcall(c.Disconnect, c)
 	end
+	table.clear(self._generatorConnections)
+
+	local progressVal = self:_getProgressObject(gen)
+	if progressVal then
+		local conn = progressVal.Changed:Connect(function(newValue)
+			self:_onProgressChanged(newValue)
+		end)
+		table.insert(self._generatorConnections, conn)
+		if progressVal:IsA("NumberValue") then
+		else
+			local data = progressVal:FindFirstChild("Data")
+			if data then
+				local inner = data:FindFirstChild("Value")
+				if inner and inner:IsA("NumberValue") then
+					local conn2 = inner.Changed:Connect(function(v)
+						self:_onProgressChanged(v)
+					end)
+					table.insert(self._generatorConnections, conn2)
+					self:_onProgressChanged(inner.Value)
+				end
+			end
+		end
+	end
+end
+
+function AutoGenerator:_onProgressChanged(newValue)
+	if not self._repairing then return end
+	if type(newValue) ~= "number" then return end
+
+	local stagesNow = self:_countStagesAt(newValue)
+	local reached = math.max(0, stagesNow - self._stagesAtEnter - self._stagesReachedSinceEnter)
+	if reached > 0 then
+		self.StagesCompleted = self.StagesCompleted + reached
+		self._stagesReachedSinceEnter = self._stagesReachedSinceEnter + reached
+	end
+
+	if newValue >= STAGE_COMPLETE then
+		self.Status = "Repairing - 100%"
+		self:_onGeneratorComplete()
+		return
+	end
+	self.Status = string.format("Repairing - %d%%", newValue)
 end
 
 function AutoGenerator:_bindCharacter(character)
@@ -206,17 +274,17 @@ function AutoGenerator:_bindCharacter(character)
 	local speedMuls = character:FindFirstChild("SpeedMultipliers")
 	if speedMuls then
 		self:_bindSpeedMultipliers(speedMuls)
-	else
-		self:_signalLeave()
 	end
+
+	character.Destroying:Connect(function()
+		self:_signalLeave()
+	end)
 end
 
 function AutoGenerator:_bindSpeedMultipliers(folder)
 	local fixing = folder:FindFirstChild("FixingGenerator")
 	if fixing then
 		self:_signalEnter()
-	else
-		self:_signalLeave()
 	end
 	local onAdded = folder.ChildAdded:Connect(function(child)
 		if child.Name == "FixingGenerator" then
@@ -245,13 +313,15 @@ function AutoGenerator:_bindPlayerGui(pg)
 			if found then
 				self:_signalEnter()
 			else
-				self:_signalLeave()
+				if self._insideGenerator and not self:_hasAnyFixSignal() then
+					self:_signalLeave()
+				end
 			end
 		end
 		check()
 		local addConn = tempUi.ChildAdded:Connect(check)
 		local remConn = tempUi.ChildRemoved:Connect(function()
-			task.wait(0.1)
+			task.wait(0.15)
 			check()
 		end)
 		table.insert(self._connections, addConn)
@@ -269,6 +339,30 @@ function AutoGenerator:_bindPlayerGui(pg)
 		end
 	end)
 	table.insert(self._connections, addedConn)
+end
+
+function AutoGenerator:_hasAnyFixSignal()
+	local player = Players.LocalPlayer
+	if not player then return false end
+	local char = player.Character
+	if char then
+		local sm = char:FindFirstChild("SpeedMultipliers")
+		if sm and sm:FindFirstChild("FixingGenerator") then
+			return true
+		end
+	end
+	local pg = player:FindFirstChild("PlayerGui")
+	if pg then
+		local tui = pg:FindFirstChild("TemporaryUI")
+		if tui then
+			for _, child in ipairs(tui:GetChildren()) do
+				if child:FindFirstChild("BarHolder", true) then
+					return true
+				end
+			end
+		end
+	end
+	return false
 end
 
 function AutoGenerator:_getMapFolder()
@@ -317,7 +411,7 @@ end
 
 function AutoGenerator:_findCurrentGenerator()
 	local folder = self:_getMapFolder()
-	if not folder then return nil end
+	if not folder then return self._currentGenerator end
 	local root = self:_getRootPart()
 	if not root then return self._currentGenerator end
 
@@ -343,18 +437,27 @@ function AutoGenerator:_findCurrentGenerator()
 			end
 		end
 	end
-	return best
+	return best or self._currentGenerator
 end
 
 function AutoGenerator:_getProgressValue(generator)
+	local obj = self:_getProgressObject(generator)
+	if not obj then return nil end
+	if obj:IsA("NumberValue") then return obj.Value end
+	local val = obj:FindFirstChild("Value")
+	if val and val:IsA("NumberValue") then return val.Value end
+	for _, d in ipairs(obj:GetDescendants()) do
+		if d:IsA("NumberValue") then return d.Value end
+	end
+	return nil
+end
+
+function AutoGenerator:_getProgressObject(generator)
 	if not generator then return nil end
 	local progress = generator:FindFirstChild("Progress")
-	if not progress then return nil end
-	if progress:IsA("NumberValue") then return progress.Value end
-	local val = progress:FindFirstChild("Value")
-	if val and val:IsA("NumberValue") then return val.Value end
-	for _, d in ipairs(progress:GetDescendants()) do
-		if d:IsA("NumberValue") then return d.Value end
+	if progress then return progress end
+	for _, d in ipairs(generator:GetDescendants()) do
+		if d.Name == "Progress" then return d end
 	end
 	return nil
 end
@@ -368,35 +471,13 @@ function AutoGenerator:_countStagesAt(progress)
 end
 
 function AutoGenerator:_sendRepair()
-	local re = self._currentGenRemotes
+	local re = self._currentGenRE
 	if not re then return false end
-	local gen = self._currentGenerator
-	if not gen then return false end
-
 	local ok = pcall(re.FireServer, re)
 	if not ok then
 		self.Status = "Repair event failed"
 		return false
 	end
-
-	task.wait(0.05)
-
-	local newProgress = self:_getProgressValue(gen)
-	if newProgress == nil then return true end
-
-	local stagesNow = self:_countStagesAt(newProgress)
-	local totalNewStages = math.max(0, stagesNow - self._stagesAtEnter - self._stagesCountedFromEnter)
-	if totalNewStages > 0 then
-		self.StagesCompleted = self.StagesCompleted + totalNewStages
-		self._stagesCountedFromEnter = self._stagesCountedFromEnter + totalNewStages
-	end
-
-	if newProgress >= STAGE_COMPLETE then
-		self.Status = "Repairing - 100%"
-	else
-		self.Status = string.format("Repairing - %d%%", newProgress)
-	end
-
 	return true
 end
 
@@ -407,33 +488,26 @@ function AutoGenerator:_tick(dt)
 		self._mapFolder = self:_getMapFolder()
 	end
 
-	if not self._insideGenerator then return end
+	if not self._repairing then return end
+
 	local gen = self._currentGenerator
 	if not gen then
-		self:_signalLeave()
+		self:_detachGenerator(false)
 		return
 	end
 
 	local progress = self:_getProgressValue(gen)
-	if progress == nil then return end
-
-	if progress >= STAGE_COMPLETE then
-		self:_finalizeGenerator(true)
+	if progress ~= nil and progress >= STAGE_COMPLETE then
+		self:_onGeneratorComplete()
 		return
 	end
 
-	local _, re = self:_getGeneratorRemotes(gen)
-	if re ~= self._currentGenRemotes then
-		self._currentGenRemotes = re
-	end
-	if not re then return end
-
 	local now = tick() * 1000
-	local delay = math.max(self.DelayMs, FIRE_COOLDOWN_MS)
 	if now < self._nextFireAt then return end
 
-	self:_sendRepair()
-	self._nextFireAt = now + delay
+	if self:_sendRepair() then
+		self._nextFireAt = now + self.DelayMs
+	end
 end
 
 return AutoGenerator

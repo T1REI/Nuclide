@@ -413,7 +413,7 @@ TasksTab:CreateToggle({
 TasksTab:CreateSlider({
 	name = "Tick delay",
 	flag = "AutoGenDelay",
-	range = {1, 1000},
+	range = {1, 2000},
 	increment = 1,
 	suffix = "ms",
 	value = 100,
